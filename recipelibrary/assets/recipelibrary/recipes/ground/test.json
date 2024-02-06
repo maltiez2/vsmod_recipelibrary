@@ -1,0 +1,9 @@
+{
+    "trigger": {"type": "item", "code": "maltiezfirearms:flaskfurniture-tinbronze", "quantity": 1},
+    "ingredients": {
+      "A": {"type": "item", "code": "maltiezfirearms:flaskfurniture-tinbronze", "quantity": 1},
+      "C": {"type": "item", "code": "game:plank-*", "quantity": 1}
+    },
+    "finisher": {"type": "item", "code": "maltiezfirearms:flaskfurniture-tinbronze", "quantity": 1},
+    "output": {"type": "item", "code": "maltiezfirearms:powderflask", "attributes": {"durability": 0}}
+  }
