@@ -3,37 +3,40 @@ using System.Collections.Generic;
 using System.Linq;
 using Vintagestory.API.Common;
 
-namespace RecipeLibrary.Ground;
+namespace RecipeLibrary;
 
-public class RecipeGraph
+public class RecipeGraph : IRecipeGraph
 {
-    public RecipeNode Root { get; }
+    public IGraphMatchingRecipeNode Root { get; }
     public int Depth { get; }
+    public IGraphMatchingRecipe Recipe { get; }
 
-    public RecipeGraph(GroundRecipe recipe, IWorldAccessor world)
+    public RecipeGraph(IGraphMatchingRecipe recipe, IWorldAccessor world)
     {
-        string[] root = recipe.ResolveTriggerWildcard(world);
+        IIngredientMatcher root = recipe.Root(world);
 
-        List<List<string[]>> ingredients = recipe.ResolveWildcards(world);
+        List<List<IIngredientMatcher>> ingredients = recipe.Nodes(world);
 
-        IEnumerable<RecipeNode> previousLayer = Construct(ingredients[^1], Array.Empty<RecipeNode>(), recipe);
+        IEnumerable<IGraphMatchingRecipeNode> previousLayer = Construct(ingredients[^1], Array.Empty<RecipeNode>(), recipe);
 
         for (int layer = ingredients.Count - 2; layer >= 0; layer--)
         {
             previousLayer = Construct(ingredients[layer], previousLayer, recipe);
         }
 
-        Root = new(recipe, root, previousLayer);
-        Depth = Root.GetDepth();
+        RecipeNode rootNode = new(recipe, root, previousLayer);
+        Root = rootNode;
+        Depth = rootNode.GetDepth();
+        Recipe = recipe;
     }
     
-    private IEnumerable<RecipeNode> Construct(List<string[]> codes, IEnumerable<RecipeNode> children, GroundRecipe recipe)
+    private IEnumerable<IGraphMatchingRecipeNode> Construct(List<IIngredientMatcher> matchers, IEnumerable<IGraphMatchingRecipeNode> children, IGraphMatchingRecipe recipe)
     {
-        List<PreNode> preGraph = PreGraph.Construct(codes.Count);
+        List<PreNode> preGraph = PreGraph.Construct(matchers.Count);
 
         foreach (PreNode node in preGraph)
         {
-            ConstructRecursive(node, codes, children, recipe);
+            ConstructRecursive(node, matchers, children, recipe);
         }
 
         IEnumerable<RecipeNode> result = preGraph.Select(node => node.Node).OfType<RecipeNode>();
@@ -46,27 +49,27 @@ public class RecipeGraph
         return result;
     }
 
-    private void ConstructRecursive(PreNode preNode, List<string[]> codes, IEnumerable<RecipeNode> children, GroundRecipe recipe)
+    private void ConstructRecursive(PreNode preNode, List<IIngredientMatcher> matchers, IEnumerable<IGraphMatchingRecipeNode> children, IGraphMatchingRecipe recipe)
     {
         foreach (PreNode child in preNode.Children)
         {
-            ConstructRecursive(child, codes, children, recipe);
+            ConstructRecursive(child, matchers, children, recipe);
         }
 
         if (preNode.Children.Any())
         {
-            preNode.Node = new(recipe, codes[preNode.Self], preNode.Children.Select(node => node.Node).OfType<RecipeNode>());
+            preNode.Node = new RecipeNode(recipe, matchers[preNode.Self], preNode.Children.Select(node => node.Node).OfType<IGraphMatchingRecipeNode>());
         }
         else
         {
-            preNode.Node = new(recipe, codes[preNode.Self], children);
+            preNode.Node = new RecipeNode(recipe, matchers[preNode.Self], children);
         }
     }
 }
 
 internal static class PreGraph
 {
-    private static Dictionary<int, List<PreNode>> sGraphs = new();
+    private static readonly Dictionary<int, List<PreNode>> sGraphs = new();
 
     public static List<PreNode> Construct(int depth)
     {
@@ -75,23 +78,6 @@ internal static class PreGraph
         sGraphs[depth] = CollapseHeads(CollapseTails(GenerateColumns(GetPermutations(depth))));
 
         return sGraphs[depth];
-    }
-
-    private static void ConstructRecursive(PreNode preNode, List<string[]> codes, IEnumerable<RecipeNode> children, GroundRecipe recipe)
-    {
-        foreach (PreNode child in preNode.Children)
-        {
-            ConstructRecursive(child, codes, children, recipe);
-        }
-
-        if (preNode.Children.Any())
-        {
-            preNode.Node = new(recipe, codes[preNode.Self], preNode.Children.Select(node => node.Node).OfType<RecipeNode>());
-        }
-        else
-        {
-            preNode.Node = new(recipe, codes[preNode.Self], children);
-        }
     }
 
     private static List<List<int>> GetPermutations(int N)
@@ -244,7 +230,7 @@ internal sealed class PreNode
     public List<PreNode> Children { get; set; } = new();
     public List<PreNode> Parents { get; set; } = new();
 
-    public RecipeNode? Node { get; set; }
+    public IGraphMatchingRecipeNode? Node { get; set; }
 
     public void ReplaceChild(PreNode from, PreNode to)
     {
@@ -296,31 +282,24 @@ internal sealed class PreNode
     }
 }
 
-public sealed class RecipeNode
+public sealed class RecipeNode : IGraphMatchingRecipeNode
 {
-    public GroundRecipe Recipe { get; }
-    public IEnumerable<int> Codes { get; }
-    public IEnumerable<RecipeNode> Children { get; }
+    public IGraphMatchingRecipe Recipe { get; }
+    public IIngredientMatcher Matcher { get; }
+    public IEnumerable<IGraphMatchingRecipeNode> Children { get; }
 
-    public RecipeNode(GroundRecipe recipe, IEnumerable<string> codes, IEnumerable<RecipeNode> children)
+    public RecipeNode(IGraphMatchingRecipe recipe, IIngredientMatcher matcher, IEnumerable<IGraphMatchingRecipeNode> children)
     {
         Children = children;
         Recipe = recipe;
-        Codes = codes.Select(code => code.GetHashCode());
+        Matcher = matcher;
     }
 
-    public bool Match(string code) => Codes.Contains(code.GetHashCode());
-    public bool Match(int hash) => Codes.Contains(hash);
-    public bool Leaf() => !Children.Any();
-    public RecipeNode? Next(string code)
+    public bool Match(ItemSlot slot) => Matcher.Match(slot);
+    public bool Last() => !Children.Any();
+    public IEnumerable<IGraphMatchingRecipeNode> Next(ItemSlot slot)
     {
-        int hash = code.GetHashCode();
-
-        IEnumerable<RecipeNode> selected = Children.Where(x => x.Match(hash));
-
-        if (selected.Any()) return selected.First();
-
-        return null;
+        return Children.Where(x => x.Match(slot));
     }
     public int GetDepth(int prev = 1)
     {
@@ -329,4 +308,3 @@ public sealed class RecipeNode
         return GetDepth(prev + 1);
     }
 }
-

@@ -18,7 +18,7 @@ public class GroundRecipeIngredient : CraftingRecipeIngredient
     public bool Trigger { get; set; }
 
     #region Serialisation
-    
+
     private static void ToBytes(ModelTransform transform, BinaryWriter writer)
     {
         writer.Write(transform.Translation.X);
@@ -62,7 +62,7 @@ public class GroundRecipeIngredient : CraftingRecipeIngredient
         writer.Write(Sound?.ToShortString() ?? "");
 
         writer.Write(Trigger);
-        
+
     }
     public override void FromBytes(BinaryReader reader, IWorldAccessor resolver)
     {
@@ -120,8 +120,7 @@ public class GroundRecipeIngredient : CraftingRecipeIngredient
     #endregion
 }
 
-
-public class GroundRecipe : IByteSerializable
+public class GroundRecipe : IGraphMatchingRecipe, IByteSerializable
 {
     #region JsonFields
 
@@ -138,9 +137,23 @@ public class GroundRecipe : IByteSerializable
     public bool CopyAttributesTrigger { get; set; } = false;
     public int[] CopyAttributesFrom { get; set; } = Array.Empty<int>();
     public AssetLocation Name { get; set; } = new("");
-    
+
     [JsonConverter(typeof(JsonAttributesConverter))]
     public JsonObject? Attributes { get; set; }
+
+    #endregion
+
+    #region Workaround
+
+    private GridRecipe? mRecipeWorkaround;
+
+    public void ConstructWorkaround()
+    {
+        mRecipeWorkaround = new()
+        {
+            // @TODO
+        };
+    }
 
     #endregion
 
@@ -329,7 +342,7 @@ public class GroundRecipe : IByteSerializable
 
         int quantity = Math.Min(ingredient.ResolvedItemstack.StackSize, inStack.StackSize);
 
-        //inStack.Collectible.OnConsumedByCrafting(inputSlots, fromSlot, this, ingredient, byPlayer, quantity); // @TODO
+        inStack.Collectible.OnConsumedByCrafting(inputSlots, fromSlot, mRecipeWorkaround, ingredient, byPlayer, quantity);
 
         ingredient.ResolvedItemstack.StackSize -= quantity;
 
@@ -353,7 +366,7 @@ public class GroundRecipe : IByteSerializable
 
         int quantity = Math.Min(ingredient.Quantity, inStack.StackSize);
 
-        //inStack.Collectible.OnConsumedByCrafting(inputSlots, fromSlot, this, ingredient, byPlayer, quantity);
+        inStack.Collectible.OnConsumedByCrafting(inputSlots, fromSlot, mRecipeWorkaround, ingredient, byPlayer, quantity);
 
         if (ingredient.IsTool)
         {
@@ -372,12 +385,12 @@ public class GroundRecipe : IByteSerializable
 
         if (input != null)
         {
-            Vintagestory.API.Datastructures.ITreeAttribute attr = input.Attributes.Clone();
+            ITreeAttribute attr = input.Attributes.Clone();
             attr.MergeTree(output.Attributes);
             output.Attributes = attr;
         }
 
-        //outputSlot.Itemstack.Collectible.OnCreatedByCrafting(inputSlots, outputSlot, this); // @TODO
+        outputSlot.Itemstack.Collectible.OnCreatedByCrafting(inputSlots, outputSlot, mRecipeWorkaround);
     }
     private ItemStack? GetInputStackForPatternCode(ItemSlot[] inputSlots)
     {
@@ -399,8 +412,8 @@ public class GroundRecipe : IByteSerializable
         IEnumerable<ItemStack> stacks = inputSlots.Where(slot =>
             !slot.Empty &&
             slot.Itemstack != null &&
-            ingredient.SatisfiesAsIngredient(slot.Itemstack)//&&
-                                                            //slot.Itemstack.Collectible.MatchesForCrafting(slot.Itemstack, this, ingredient)) // @TODO
+            ingredient.SatisfiesAsIngredient(slot.Itemstack) &&
+            slot.Itemstack.Collectible.MatchesForCrafting(slot.Itemstack, mRecipeWorkaround, ingredient)
             ).Select(slot => slot.Itemstack);
 
         if (!stacks.Any()) return null;
@@ -411,7 +424,7 @@ public class GroundRecipe : IByteSerializable
     #endregion
 
     #region Serialisation
-    
+
     public void ToBytes(BinaryWriter writer)
     {
         writer.Write(Enabled);
@@ -451,7 +464,7 @@ public class GroundRecipe : IByteSerializable
     public void FromBytes(BinaryReader reader, IWorldAccessor resolver)
     {
         Enabled = reader.ReadBoolean();
-        
+
         Output = new();
         Output.FromBytes(reader, resolver);
 
@@ -508,7 +521,7 @@ public class GroundRecipe : IByteSerializable
             RecipeGroup = RecipeGroup,
             CopyAttributesTrigger = CopyAttributesTrigger,
             CopyAttributesFrom = (int[])CopyAttributesFrom.Clone(),
-            Name = Name?.Clone(),
+            Name = Name.Clone(),
             Trigger = Trigger.Clone(),
             Output = Output.Clone(),
             Attributes = Attributes?.Clone()
@@ -532,4 +545,7 @@ public class GroundRecipe : IByteSerializable
     }
 
     #endregion
+
+    public IIngredientMatcher Root(IWorldAccessor world) => throw new NotImplementedException(); // @TODO
+    public List<List<IIngredientMatcher>> Nodes(IWorldAccessor world) => throw new NotImplementedException(); // @TODO
 }

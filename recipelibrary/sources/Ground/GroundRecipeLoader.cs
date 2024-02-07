@@ -4,7 +4,6 @@ using System.Linq;
 using Vintagestory.API.Common;
 using Vintagestory.API.Config;
 using Vintagestory.API.Server;
-using Vintagestory.GameContent;
 
 namespace RecipeLibrary.Ground;
 
@@ -36,7 +35,7 @@ public class GroundRecipeLoader : ModSystem
             LoadRecipe(location, recipe.ToObject<GroundRecipe>(location.Domain));
             recipeQuantity++;
         }
-        
+
         foreach ((AssetLocation location, JArray recipesArray) in files.OfType<(AssetLocation, JArray)>())
         {
             foreach (JToken token in recipesArray)
