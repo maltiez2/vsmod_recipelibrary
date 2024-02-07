@@ -1,4 +1,4 @@
-﻿using HarmonyLib;
+﻿
 using Newtonsoft.Json;
 using Newtonsoft.Json.Linq;
 using System;
@@ -181,7 +181,8 @@ public class GroundRecipe : IByteSerializable
         if (!Trigger.Code.Path.Contains('*'))
         {
             LoggerWrapper.Verbose(world, this, $"[ResolveWildcards()] Ground recipe '{Name}'. Trigger ingredient is not a wildcard, skipping.");
-            return Array.Empty<string>();
+
+            return new string[] { Trigger.Code.Path };
         }
 
         try
@@ -294,7 +295,7 @@ public class GroundRecipe : IByteSerializable
 
         List<GroundRecipeIngredient> exactMatchIngredients = new();
 
-        foreach (GroundRecipeIngredient ingredient in Ingredients.SelectMany(x => x).Where(item => !item.IsWildCard && !item.IsTool).AddItem(Trigger))
+        foreach (GroundRecipeIngredient ingredient in Ingredients.SelectMany(x => x).Where(item => !item.IsWildCard && !item.IsTool).Append(Trigger))
         {
             ItemStack stack = ingredient.ResolvedItemstack;
 
@@ -316,7 +317,7 @@ public class GroundRecipe : IByteSerializable
     {
         if (Trigger == null) return new();
 
-        return Ingredients.SelectMany(x => x).AddItem(Trigger).Where(ingredient => ingredient.IsWildCard || ingredient.IsTool).ToList();
+        return Ingredients.SelectMany(x => x).Append(Trigger).Where(ingredient => ingredient.IsWildCard || ingredient.IsTool).ToList();
     }
     private void ConsumeExactMatch(ItemStack inStack, List<GroundRecipeIngredient> exactMatchIngredients, IPlayer byPlayer, ItemSlot[] inputSlots, ItemSlot fromSlot)
     {
