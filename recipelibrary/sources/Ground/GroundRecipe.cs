@@ -10,7 +10,7 @@ using Vintagestory.API.Util;
 
 namespace RecipesLibrary.Ground;
 
-public class GroundRecipeIngredient : CraftingRecipeIngredient
+public class GroundRecipeIngredient : CraftingRecipeIngredient, IIngredientMatcher
 {
     public ModelTransform? GroundRecipeTransform { get; set; }
     public AssetLocation? Sound { get; set; }
@@ -116,6 +116,8 @@ public class GroundRecipeIngredient : CraftingRecipeIngredient
         return clone;
     }
 
+    public bool Match(ItemSlot slot) => SatisfiesAsIngredient(slot.Itemstack);
+
     #endregion
 }
 
@@ -144,6 +146,8 @@ public class GroundRecipe : IGraphMatchingRecipe, IByteSerializable
 
     #endregion
 
+    public IRecipeGraph? Graph { get; private set; }
+
     #region Workaround
 
     private GridRecipe? mRecipeWorkaround;
@@ -171,6 +175,8 @@ public class GroundRecipe : IGraphMatchingRecipe, IByteSerializable
         {
             if (!ResolveIngredient(ingredient, world)) resolvedAll = false;
         }
+
+        Graph = new RecipeGraph(this, world);
 
         return resolvedAll;
     }
@@ -558,6 +564,6 @@ public class GroundRecipe : IGraphMatchingRecipe, IByteSerializable
 
     #endregion
 
-    public IIngredientMatcher Root(IWorldAccessor world) => throw new NotImplementedException(); // @TODO
-    public List<List<IIngredientMatcher>> Nodes(IWorldAccessor world) => throw new NotImplementedException(); // @TODO
+    public IIngredientMatcher Root(IWorldAccessor world) => Starter;
+    public List<List<IIngredientMatcher>> Nodes(IWorldAccessor world) => Ingredients.Select(entry => entry.Select(entry => entry as IIngredientMatcher).ToList()).ToList();
 }

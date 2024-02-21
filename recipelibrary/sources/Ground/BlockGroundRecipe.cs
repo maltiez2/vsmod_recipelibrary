@@ -6,12 +6,11 @@ using Vintagestory.API.MathTools;
 using Vintagestory.API.Util;
 
 namespace RecipesLibrary.Ground;
+
 public class GroundRecipeBlock : Block
 {
-    public const string ID = "Toolworks.BlockBindSpot";
-
-    WorldInteraction[] handleInteractions;
-    WorldInteraction[] bindInteractions;
+    private WorldInteraction[] handleInteractions = System.Array.Empty<WorldInteraction>();
+    private WorldInteraction[] bindInteractions = System.Array.Empty<WorldInteraction>();
 
     public override void OnLoaded(ICoreAPI api)
     {
@@ -19,7 +18,7 @@ public class GroundRecipeBlock : Block
         if (api.Side != EnumAppSide.Client) return;
         ICoreClientAPI capi = api as ICoreClientAPI;
 
-        handleInteractions = ObjectCacheUtil.GetOrCreate(api, "toolworks:bindSpotHandleInteractions", () =>
+        /*handleInteractions = ObjectCacheUtil.GetOrCreate(api, "toolworks:bindSpotHandleInteractions", () =>
         {
             List<ItemStack> handleList = new();
 
@@ -62,10 +61,10 @@ public class GroundRecipeBlock : Block
                         Itemstacks = bindList.ToArray(),
                     }
                 };
-        });
+        });*/
     }
 
-    public bool TryCreateSpot(IWorldAccessor world, BlockSelection blockSel, IPlayer player)
+    public bool TryCreateSpot(IWorldAccessor world, BlockSelection blockSel, IPlayer player, IEnumerable<GroundRecipe> recipes)
     {
         if (!world.Claims.TryAccess(player, blockSel.Position, EnumBlockAccessFlags.BuildOrBreak))
         {
@@ -83,8 +82,12 @@ public class GroundRecipeBlock : Block
         if (world.BlockAccessor.GetBlock(upPos).Replaceable < 6000) return false;
 
         world.BlockAccessor.SetBlock(BlockId, upPos);
-        BlockEntity be = world.BlockAccessor.GetBlockEntity(upPos);
-        (be as GroundRecipeEntity)?.OnCreated(player);
+        BlockEntity blockEntity = world.BlockAccessor.GetBlockEntity(upPos);
+
+        if (blockEntity is GroundRecipeEntity recipeEntity)
+        {
+            recipeEntity.OnCreated(player, recipes);
+        }
 
         (player as IClientPlayer)?.TriggerFpAnimation(EnumHandInteract.HeldItemInteract);
         return true;
@@ -147,10 +150,10 @@ public class GroundRecipeBlock : Block
     public override WorldInteraction[] GetPlacedBlockInteractionHelp(IWorldAccessor world, BlockSelection selection, IPlayer forPlayer)
     {
         WorldInteraction[] interactions = base.GetPlacedBlockInteractionHelp(world, selection, forPlayer);
-        GroundRecipeEntity? be = world.BlockAccessor.GetBlockEntity(selection.Position) as GroundRecipeEntity;
-        if (be == null) return interactions;
+        GroundRecipeEntity? blockEntity = world.BlockAccessor.GetBlockEntity(selection.Position) as GroundRecipeEntity;
+        if (blockEntity == null) return interactions;
 
-        if (be.Inventory[1].Empty)
+        if (blockEntity.Inventory[1].Empty)
         {
             return handleInteractions.Append(interactions);
         }

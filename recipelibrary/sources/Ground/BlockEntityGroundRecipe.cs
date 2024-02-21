@@ -1,4 +1,6 @@
 ﻿using System;
+using System.Collections.Generic;
+using System.Linq;
 using System.Text;
 using Vintagestory.API.Client;
 using Vintagestory.API.Common;
@@ -9,28 +11,26 @@ using Vintagestory.GameContent;
 namespace RecipesLibrary.Ground;
 public class GroundRecipeEntity : BlockEntityDisplay, IBlockEntityContainer
 {
-    public const string ID = "Toolworks.BindSpot";
-    public const float BIND_SECONDS = 3.0f;
+    public IEnumerable<GroundRecipe> Recipes { get; set; } = new List<GroundRecipe>();
 
-    public object inventoryLock = new();
+    public override string InventoryClassName => "groundrecipespot";
+    public override InventoryBase Inventory => mInventory;
+    public override int DisplayedItems => mSlotsTaken;
 
-    protected InventoryGeneric inventory;
-
-    public override string InventoryClassName => "bindspot";
-    public override InventoryBase Inventory
-    {
-        get { return inventory; }
-    }
-    public override string AttributeTransformCode => "bindSpotTransform";
-    public override int DisplayedItems => 2;
+    private InventoryGeneric? mInventory;
+    private int mMaxSlots = 0;
+    private int mSlotsTaken = 0;
+    private ICoreAPI? mApi;
+    private IRecipeGraphTraversalStack? mTraversalStack;
 
     public GroundRecipeEntity() : base()
     {
-        inventory = new InventoryGeneric(2, null, null);
+        
     }
 
     public override void Initialize(ICoreAPI api)
     {
+        mApi = api;
         capi = api as ICoreClientAPI;
         base.Initialize(api);
 
@@ -38,14 +38,16 @@ public class GroundRecipeEntity : BlockEntityDisplay, IBlockEntityContainer
         {
             updateMeshes();
         }
-
-        Item
     }
 
-    public void OnCreated(IPlayer byPlayer)
+    public void OnCreated(IPlayer byPlayer, IEnumerable<GroundRecipe> recipes)
     {
-        if (Api.Side == EnumAppSide.Client)
-            return;
+        Recipes = recipes;
+        mMaxSlots = GetDepth();
+        mInventory = new InventoryGeneric(mMaxSlots, null, null);
+        mTraversalStack = new RecipeGraphTraversalStack(recipes.Select(recipe => recipe.Graph).OfType<IRecipeGraph>());
+
+        if (Api.Side == EnumAppSide.Client) return;
 
         ItemSlot heldSlot = byPlayer.InventoryManager.ActiveHotbarSlot;
         string placeSound = (heldSlot.Itemstack.ItemAttributes?["placeSound"].ToString()) ?? "sounds/player/build";
@@ -72,7 +74,7 @@ public class GroundRecipeEntity : BlockEntityDisplay, IBlockEntityContainer
             else
             if (AttributeToolBinding.HasAttribute(heldSlot.Itemstack))
             {
-                if (inventory[1].Empty) return false;
+                if (mInventory[1].Empty) return false;
                 return true;
             }
         }
@@ -82,7 +84,7 @@ public class GroundRecipeEntity : BlockEntityDisplay, IBlockEntityContainer
             updateMeshes();
         }
 
-        if (inventory.Empty)
+        if (mInventory.Empty)
         {
             world.BlockAccessor.SetBlock(0, Pos);
             world.BlockAccessor.TriggerNeighbourBlockUpdate(Pos);
@@ -96,7 +98,7 @@ public class GroundRecipeEntity : BlockEntityDisplay, IBlockEntityContainer
         ItemSlot heldSlot = byPlayer.InventoryManager.ActiveHotbarSlot;
         if (heldSlot.Empty) return false;
 
-        if (inventory[1].Empty) return false;
+        if (mInventory[1].Empty) return false;
         if (!AttributeToolBinding.HasAttribute(heldSlot.Itemstack)) return false;
 
         if (world is IClientWorldAccessor)
@@ -122,14 +124,14 @@ public class GroundRecipeEntity : BlockEntityDisplay, IBlockEntityContainer
         ItemSlot heldSlot = byPlayer.InventoryManager.ActiveHotbarSlot;
         if (heldSlot.Empty) return;
 
-        if (inventory[1].Empty) return;
+        if (mInventory[1].Empty) return;
         if (!AttributeToolBinding.HasAttribute(heldSlot.Itemstack)) return;
 
         if (secondsUsed > BIND_SECONDS - 0.05f && world.Side == EnumAppSide.Server)
         {
-            ItemStack headStack = inventory[0].Itemstack;
+            ItemStack headStack = mInventory[0].Itemstack;
             ItemStack bindStack = heldSlot.TakeOut(1);
-            ItemStack handleStack = inventory[1].Itemstack;
+            ItemStack handleStack = mInventory[1].Itemstack;
 
             string tool = headStack.Collectible.GetBehavior<CollectibleBehaviorToolHead>().HeadProps.tool;
             string material = headStack.Collectible.Code.EndVariant();
@@ -168,8 +170,8 @@ public class GroundRecipeEntity : BlockEntityDisplay, IBlockEntityContainer
         string placeSound = (putSlot.Itemstack.ItemAttributes?["placeSound"].ToString()) ?? "sounds/player/build";
         lock (inventoryLock)
         {
-            if (!inventory[1].Empty) return false;
-            if (putSlot.TryPutInto(Api.World, inventory[1]) > 0)
+            if (!mInventory[1].Empty) return false;
+            if (putSlot.TryPutInto(Api.World, mInventory[1]) > 0)
             {
                 Api.World.PlaySoundAt(new AssetLocation(placeSound), Pos.X, Pos.Y, Pos.Z, null, 0.88f + (float)Api.World.Rand.NextDouble() * 0.24f, 16);
             }
@@ -187,8 +189,8 @@ public class GroundRecipeEntity : BlockEntityDisplay, IBlockEntityContainer
 
         lock (inventoryLock)
         {
-            ItemSlot takeSlot = inventory[1];
-            if (takeSlot.Empty) takeSlot = inventory[0];
+            ItemSlot takeSlot = mInventory[1];
+            if (takeSlot.Empty) takeSlot = mInventory[0];
             string placeSound = (takeSlot.Itemstack.ItemAttributes?["placeSound"].ToString()) ?? "sounds/player/build";
             player.InventoryManager.TryGiveItemstack(takeSlot.Itemstack);
 
@@ -197,11 +199,6 @@ public class GroundRecipeEntity : BlockEntityDisplay, IBlockEntityContainer
             takeSlot.MarkDirty();
         }
         return true;
-    }
-
-    public override void ToTreeAttributes(ITreeAttribute tree)
-    {
-        base.ToTreeAttributes(tree);
     }
 
     public override void FromTreeAttributes(ITreeAttribute tree, IWorldAccessor worldForResolving)
@@ -231,5 +228,18 @@ public class GroundRecipeEntity : BlockEntityDisplay, IBlockEntityContainer
     public override void GetBlockInfo(IPlayer forPlayer, StringBuilder dsc)
     {
 
+    }
+
+
+
+    private int GetDepth()
+    {
+        int maxDepth = 0;
+        foreach (GroundRecipe recipe in Recipes)
+        {
+            int depth = recipe.Graph?.Depth ?? 0;
+            if (depth > maxDepth) maxDepth = depth;
+        }
+        return maxDepth;
     }
 }

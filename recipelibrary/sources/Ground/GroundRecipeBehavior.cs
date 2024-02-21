@@ -15,37 +15,18 @@ public class GroundRecipeStarterBehavior : CollectibleBehavior
     {
     }
 
-    public override void Initialize(JsonObject properties)
-    {
-        if (Recipes.Count > 0)
-        {
-            JArray surfaceMatchers = new();
-            foreach (string wildcard in Recipes.Where(recipe => recipe.SurfaceRequirement != null).Select(recipe => recipe.SurfaceRequirement).OfType<string>())
-            {
-                surfaceMatchers.Add(new JValue(wildcard));
-            }
-            (properties.Token as JObject)?.Add("surfaceMatchers", surfaceMatchers);
-        }   
-
-        mProperties = properties;
-
-        base.Initialize(properties);
-    }
-
     public override void OnLoaded(ICoreAPI api)
     {
-        if (Recipes.Count > 0)
+        foreach (GroundRecipe recipe in Recipes)
         {
-            List<AssetLocation> surfaceMatchers = new();
-            foreach (string wildcard in Recipes.Where(recipe => recipe.SurfaceRequirement != null).Select(recipe => recipe.SurfaceRequirement).OfType<string>())
+            if (recipe.SurfaceRequirement != null)
             {
-                surfaceMatchers.Add(new(wildcard));
+                mSurfaceMatchers.Add(recipe, new(recipe.SurfaceRequirement));
             }
-            mSurfaceMatchers = surfaceMatchers.ToArray();
-        }
-        else
-        {
-            mSurfaceMatchers = mProperties?["surfaceMatchers"]?.AsArray().Select(json => new AssetLocation(json.AsString())).ToArray() ?? System.Array.Empty<AssetLocation>();
+            else
+            {
+                mAnySurfaceRecipes.Add(recipe);
+            }
         }
     }
 
@@ -56,8 +37,10 @@ public class GroundRecipeStarterBehavior : CollectibleBehavior
             handling = EnumHandling.PassThrough;
             return;
         }
-        
-        if (!Match(blockSel) || !RecipeBlock.TryCreateSpot(byEntity.World, blockSel, player.Player))
+
+        IEnumerable<GroundRecipe> recipes = Match(blockSel);
+
+        if (recipes.Any()! || !RecipeBlock.TryCreateSpot(byEntity.World, blockSel, player.Player, recipes))
         {
             handling = EnumHandling.PassThrough;
             return;
@@ -67,11 +50,12 @@ public class GroundRecipeStarterBehavior : CollectibleBehavior
         handling = EnumHandling.Handled;
     }
 
-    private JsonObject? mProperties;
-    private AssetLocation[] mSurfaceMatchers = System.Array.Empty<AssetLocation>();
+    private readonly Dictionary<GroundRecipe, AssetLocation> mSurfaceMatchers = new();
+    private readonly List<GroundRecipe> mAnySurfaceRecipes = new();
 
-    private bool Match(BlockSelection selection)
+    private IEnumerable<GroundRecipe> Match(BlockSelection selection)
     {
-        return selection.Block?.WildCardMatch(mSurfaceMatchers) ?? false;
+        IEnumerable<GroundRecipe> recipes = mSurfaceMatchers.Where(entry => selection.Block?.WildCardMatch(entry.Value) ?? false).Select(entry => entry.Key);
+        return recipes.Concat(mAnySurfaceRecipes);
     }
 }
