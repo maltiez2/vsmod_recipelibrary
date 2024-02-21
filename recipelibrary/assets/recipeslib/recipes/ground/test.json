@@ -1,0 +1,26 @@
+{
+  // starts recipe
+  "trigger": {"type": "item", "code": "maltiezfirearms:flaskfurniture-tinbronze", "quantity": 1},
+  
+  // outer array - ordered
+  // inner arrays - unordered
+  "ingredients": [
+    [
+      {"type": "item", "code": "maltiezfirearms:flaskfurniture-tinbronze", "quantity": 1},
+      {"type": "item", "code": "game:plank-*", "quantity": 1}
+    ],
+    [
+      {"type": "item", "code": "maltiezfirearms:flaskfurniture-iron", "quantity": 2}
+    ],
+    [
+      {"type": "item", "code": "game:plank-*", "quantity": 2}
+    ]
+  ],
+  
+  // finishes recipe (optional)
+  "finisher": {"type": "item", "code": "maltiezfirearms:flaskfurniture-tinbronze", "quantity": 1},
+  
+  "output": {"type": "item", "code": "maltiezfirearms:powderflask", "attributes": {"durability": 0}},
+
+  "surface": "game:stone-*"
+}

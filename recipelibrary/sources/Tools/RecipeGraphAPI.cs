@@ -1,7 +1,8 @@
 ﻿using System.Collections.Generic;
 using Vintagestory.API.Common;
 
-namespace RecipeLibrary;
+namespace RecipesLibrary;
+
 public interface IIngredientMatcher
 {
     bool Match(ItemSlot slot);
@@ -10,7 +11,6 @@ public interface IIngredientMatcher
 public interface IGraphMatchingRecipe
 {
     IIngredientMatcher Root(IWorldAccessor world);
-
     List<List<IIngredientMatcher>> Nodes(IWorldAccessor world);
 }
 

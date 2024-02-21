@@ -1,5 +1,4 @@
-﻿
-using Newtonsoft.Json;
+﻿using Newtonsoft.Json;
 using Newtonsoft.Json.Linq;
 using System;
 using System.Collections.Generic;
@@ -9,13 +8,13 @@ using Vintagestory.API.Common;
 using Vintagestory.API.Datastructures;
 using Vintagestory.API.Util;
 
-namespace RecipeLibrary.Ground;
+namespace RecipesLibrary.Ground;
 
 public class GroundRecipeIngredient : CraftingRecipeIngredient
 {
     public ModelTransform? GroundRecipeTransform { get; set; }
     public AssetLocation? Sound { get; set; }
-    public bool Trigger { get; set; }
+    public bool Starter { get; set; }
 
     #region Serialisation
 
@@ -61,7 +60,7 @@ public class GroundRecipeIngredient : CraftingRecipeIngredient
 
         writer.Write(Sound?.ToShortString() ?? "");
 
-        writer.Write(Trigger);
+        writer.Write(Starter);
 
     }
     public override void FromBytes(BinaryReader reader, IWorldAccessor resolver)
@@ -85,7 +84,7 @@ public class GroundRecipeIngredient : CraftingRecipeIngredient
         string sound = reader.ReadString();
         Sound = sound == "" ? null : new(sound);
 
-        Trigger = reader.ReadBoolean();
+        Starter = reader.ReadBoolean();
     }
 
     public new GroundRecipeIngredient Clone()
@@ -106,7 +105,7 @@ public class GroundRecipeIngredient : CraftingRecipeIngredient
             RecipeAttributes = RecipeAttributes?.Clone(),
             GroundRecipeTransform = GroundRecipeTransform?.Clone(),
             Sound = Sound?.Clone(),
-            Trigger = Trigger
+            Starter = Starter
         };
 
         if (Attributes != null)
@@ -126,7 +125,8 @@ public class GroundRecipe : IGraphMatchingRecipe, IByteSerializable
 
     public bool Enabled { get; set; } = true;
 
-    public GroundRecipeIngredient Trigger { get; set; } = new();
+    public GroundRecipeIngredient Starter { get; set; } = new();
+    public GroundRecipeIngredient? Finisher { get; set; } = new();
     public List<List<GroundRecipeIngredient>> Ingredients { get; set; } = new();
     public GroundRecipeIngredient Output { get; set; } = new();
 
@@ -137,6 +137,7 @@ public class GroundRecipe : IGraphMatchingRecipe, IByteSerializable
     public bool CopyAttributesTrigger { get; set; } = false;
     public int[] CopyAttributesFrom { get; set; } = Array.Empty<int>();
     public AssetLocation Name { get; set; } = new("");
+    public string? SurfaceRequirement { get; set; } = "*";
 
     [JsonConverter(typeof(JsonAttributesConverter))]
     public JsonObject? Attributes { get; set; }
@@ -163,8 +164,9 @@ public class GroundRecipe : IGraphMatchingRecipe, IByteSerializable
     {
         bool resolvedAll = true;
 
-        if (!ResolveIngredient(Trigger, world)) resolvedAll = false;
+        if (!ResolveIngredient(Starter, world)) resolvedAll = false;
         if (!ResolveIngredient(Output, world)) resolvedAll = false;
+        if (Finisher != null && !ResolveIngredient(Finisher, world)) resolvedAll = false;
         foreach (GroundRecipeIngredient ingredient in Ingredients.SelectMany(element => element))
         {
             if (!ResolveIngredient(ingredient, world)) resolvedAll = false;
@@ -185,22 +187,22 @@ public class GroundRecipe : IGraphMatchingRecipe, IByteSerializable
 
     public string[] ResolveTriggerWildcard(IWorldAccessor world)
     {
-        if (Trigger.Name == null || Trigger.Name.Length == 0)
+        if (Starter.Name == null || Starter.Name.Length == 0)
         {
             LoggerWrapper.Verbose(world, this, $"[ResolveWildcards()] Ground recipe '{Name}'. Trigger ingredient missing name, skipping.");
             return Array.Empty<string>();
         }
 
-        if (!Trigger.Code.Path.Contains('*'))
+        if (!Starter.Code.Path.Contains('*'))
         {
             LoggerWrapper.Verbose(world, this, $"[ResolveWildcards()] Ground recipe '{Name}'. Trigger ingredient is not a wildcard, skipping.");
 
-            return new string[] { Trigger.Code.Path };
+            return new string[] { Starter.Code.Path };
         }
 
         try
         {
-            return GenerateCodes(Trigger, world);
+            return GenerateCodes(Starter, world);
         }
         catch (Exception exception)
         {
@@ -209,26 +211,24 @@ public class GroundRecipe : IGraphMatchingRecipe, IByteSerializable
             return Array.Empty<string>();
         }
     }
-    public List<List<string[]>> ResolveWildcards(IWorldAccessor world)
+    public Dictionary<string, string[]> ResolveWildcards(IWorldAccessor world)
     {
-        List<List<string[]>> wildcards = new();
+        Dictionary<string, string[]> wildcards = new();
 
         foreach (List<GroundRecipeIngredient> ingredients in Ingredients)
         {
-            wildcards.Add(ResolveWildcards(world, ingredients));
+            ResolveWildcards(world, ingredients, wildcards);
         }
 
         return wildcards;
     }
-    private List<string[]> ResolveWildcards(IWorldAccessor world, List<GroundRecipeIngredient> ingredients)
+    private void ResolveWildcards(IWorldAccessor world, List<GroundRecipeIngredient> ingredients, Dictionary<string, string[]> wildcards)
     {
-        List<string[]> wildcards = new();
-
         foreach (GroundRecipeIngredient ingredient in ingredients)
         {
             try
             {
-                wildcards.Add(GenerateCodes(ingredient, world));
+                wildcards.Add(ingredient.Name, GenerateCodes(ingredient, world));
             }
             catch (Exception exception)
             {
@@ -236,8 +236,6 @@ public class GroundRecipe : IGraphMatchingRecipe, IByteSerializable
                 LoggerWrapper.Verbose(world, this, $"[ResolveWildcards()] Ground recipe '{Name}'. Exception on resolving wildcards for ingredient '{ingredient.Code}'.\n\nException: {exception}\n\n");
             }
         }
-
-        return wildcards;
     }
     private static string[] GenerateCodes(GroundRecipeIngredient ingredient, IWorldAccessor world)
     {
@@ -304,11 +302,11 @@ public class GroundRecipe : IGraphMatchingRecipe, IByteSerializable
     }
     private List<GroundRecipeIngredient> GetExactMatchIngredients()
     {
-        if (Trigger == null) return new();
+        if (Starter == null) return new();
 
         List<GroundRecipeIngredient> exactMatchIngredients = new();
 
-        foreach (GroundRecipeIngredient ingredient in Ingredients.SelectMany(x => x).Where(item => !item.IsWildCard && !item.IsTool).Append(Trigger))
+        foreach (GroundRecipeIngredient ingredient in Ingredients.SelectMany(x => x).Where(item => !item.IsWildCard && !item.IsTool).Append(Starter))
         {
             ItemStack stack = ingredient.ResolvedItemstack;
 
@@ -328,9 +326,9 @@ public class GroundRecipe : IGraphMatchingRecipe, IByteSerializable
     }
     private List<GroundRecipeIngredient> GetWildcardIngredients()
     {
-        if (Trigger == null) return new();
+        if (Starter == null) return new();
 
-        return Ingredients.SelectMany(x => x).Append(Trigger).Where(ingredient => ingredient.IsWildCard || ingredient.IsTool).ToList();
+        return Ingredients.SelectMany(x => x).Append(Starter).Where(ingredient => ingredient.IsWildCard || ingredient.IsTool).ToList();
     }
     private void ConsumeExactMatch(ItemStack inStack, List<GroundRecipeIngredient> exactMatchIngredients, IPlayer byPlayer, ItemSlot[] inputSlots, ItemSlot fromSlot)
     {
@@ -398,7 +396,7 @@ public class GroundRecipe : IGraphMatchingRecipe, IByteSerializable
 
         if (CopyAttributesTrigger)
         {
-            ingredient = Trigger;
+            ingredient = Starter;
         }
         else if (CopyAttributesFrom.Length == 2)
         {
@@ -430,7 +428,9 @@ public class GroundRecipe : IGraphMatchingRecipe, IByteSerializable
         writer.Write(Enabled);
 
         Output.ToBytes(writer);
-        Trigger.ToBytes(writer);
+        Starter.ToBytes(writer);
+        writer.Write(Finisher != null);
+        Finisher?.ToBytes(writer);
         writer.Write(Ingredients.Count);
         foreach (List<GroundRecipeIngredient> ingredients in Ingredients)
         {
@@ -460,6 +460,8 @@ public class GroundRecipe : IGraphMatchingRecipe, IByteSerializable
         {
             writer.Write(Attributes.Token.ToString());
         }
+
+        writer.Write(SurfaceRequirement ?? "");
     }
     public void FromBytes(BinaryReader reader, IWorldAccessor resolver)
     {
@@ -468,8 +470,14 @@ public class GroundRecipe : IGraphMatchingRecipe, IByteSerializable
         Output = new();
         Output.FromBytes(reader, resolver);
 
-        Trigger = new();
-        Trigger.FromBytes(reader, resolver);
+        Starter = new();
+        Starter.FromBytes(reader, resolver);
+
+        if (reader.ReadBoolean())
+        {
+            Finisher = new();
+            Finisher.FromBytes(reader, resolver);
+        }
 
         Ingredients = new();
         int ingredientsCount = reader.ReadInt32();
@@ -509,6 +517,9 @@ public class GroundRecipe : IGraphMatchingRecipe, IByteSerializable
             string json = reader.ReadString();
             Attributes = new JsonObject(JToken.Parse(json));
         }
+
+        SurfaceRequirement = reader.ReadString();
+        SurfaceRequirement = SurfaceRequirement == "" ? null : SurfaceRequirement;
     }
     public GroundRecipe Clone()
     {
@@ -522,8 +533,9 @@ public class GroundRecipe : IGraphMatchingRecipe, IByteSerializable
             CopyAttributesTrigger = CopyAttributesTrigger,
             CopyAttributesFrom = (int[])CopyAttributesFrom.Clone(),
             Name = Name.Clone(),
-            Trigger = Trigger.Clone(),
+            Starter = Starter.Clone(),
             Output = Output.Clone(),
+            Finisher = Finisher?.Clone(),
             Attributes = Attributes?.Clone()
         };
 

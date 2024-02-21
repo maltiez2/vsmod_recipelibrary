@@ -1,31 +1,64 @@
 ﻿using Newtonsoft.Json.Linq;
 using System.Collections.Generic;
+using System.IO;
 using System.Linq;
+using Vintagestory.API.Client;
 using Vintagestory.API.Common;
 using Vintagestory.API.Config;
 using Vintagestory.API.Server;
+using Vintagestory.Common;
 
-namespace RecipeLibrary.Ground;
+namespace RecipesLibrary.Ground;
 
 public class GroundRecipeLoader : ModSystem
 {
+    public Dictionary<CollectibleObject, List<GroundRecipe>> RecipesByOutput { get; } = new();
+    public Dictionary<CollectibleObject, List<GroundRecipe>> RecipesByStarter { get; } = new();
+    public List<GroundRecipe> Recipes { get; } = new();
+
     public override double ExecuteOrder() => 1;
-    public override bool ShouldLoad(EnumAppSide forSide) => forSide == EnumAppSide.Server;
-
-    private bool mClassExclusiveRecipes = true;
-    private ICoreServerAPI? mServerApi;
-
     public override void AssetsLoaded(ICoreAPI api)
     {
-        if (api is not ICoreServerAPI serverApi) return;
+        if (api is ICoreServerAPI serverApi)
+        {
+            mServerApi = serverApi;
+            mClassExclusiveRecipes = serverApi.World.Config.GetBool("classExclusiveRecipes", true);
+            LoadGroundRecipes(serverApi);
+            StoreRecipes(serverApi, Recipes.ToArray());
+        }
 
-        mServerApi = serverApi;
-        mClassExclusiveRecipes = serverApi.World.Config.GetBool("classExclusiveRecipes", true);
-        LoadGroundRecipes(serverApi);
+        if (api is ICoreClientAPI clientApi)
+        {
+            RetrieveRecipes(clientApi, out List<GroundRecipe> recipes);
+            foreach (GroundRecipe recipe in recipes)
+            {
+                Register(recipe);
+            }
+        }
+    }
+    public override void AssetsFinalize(ICoreAPI api)
+    {
+        Block[] blocks = api.World.SearchBlocks(new("recipeslib:groundrecipe"));
+        if (blocks.Length == 0 || blocks[0] is not GroundRecipeBlock recipeBlock) return;
+
+        foreach ((CollectibleObject collectible, List<GroundRecipe> recipes) in RecipesByStarter)
+        {
+            GroundRecipeStarterBehavior behavior = new(collectible)
+            {
+                Recipes = recipes,
+                RecipeBlock = recipeBlock
+            };
+
+            collectible.CollectibleBehaviors = collectible.CollectibleBehaviors.Prepend(behavior).ToArray();
+        }
     }
 
 
-    public void LoadGroundRecipes(ICoreServerAPI serverApi)
+    private bool mClassExclusiveRecipes = true;
+    private const string cRecipesSyncAsset = "config/recipeslib/groundrecipes";
+    private ICoreServerAPI? mServerApi;
+
+    private void LoadGroundRecipes(ICoreServerAPI serverApi)
     {
         Dictionary<AssetLocation, JToken> files = serverApi.Assets.GetMany<JToken>(serverApi.Server.Logger, "recipes/ground");
         int recipeQuantity = 0;
@@ -48,74 +81,183 @@ public class GroundRecipeLoader : ModSystem
         serverApi.World.Logger.Event("{0} ground recipes loaded from {1} files", recipeQuantity, files.Count);
         serverApi.World.Logger.StoryEvent(Lang.Get("Ground inventions...")); // @TODO Come up with something better
     }
-
-
-    public void LoadRecipe(AssetLocation location, GroundRecipe recipe)
+    private static void GenerateSubRecipeFromVariants(string variant, string[] wildcards, int combinationIndex, GroundRecipe recipe, List<GroundRecipe> subRecipes, ref bool first)
     {
+        GroundRecipe subRecipe;
+
+        if (first)
+        {
+            subRecipe = recipe.Clone();
+            subRecipes.Add(subRecipe);
+            first = false;
+        }
+        else
+        {
+            subRecipe = subRecipes[combinationIndex];
+        }
+
+        foreach (GroundRecipeIngredient ingredient in subRecipe.Ingredients.SelectMany(list => list))
+        {
+            if (ingredient.Name == variant)
+            {
+                ingredient.FillPlaceHolder(variant, wildcards[combinationIndex % wildcards.Length]);
+                ingredient.Code.Path = ingredient.Code.Path.Replace("*", wildcards[combinationIndex % wildcards.Length]);
+            }
+
+            if (ingredient.ReturnedStack?.Code != null)
+            {
+                ingredient.ReturnedStack.Code.Path = ingredient.ReturnedStack.Code.Path.Replace("{" + variant + "}", wildcards[combinationIndex % wildcards.Length]);
+            }
+        }
+
+        subRecipe.Output.FillPlaceHolder(variant, wildcards[combinationIndex % wildcards.Length]);
+        subRecipe.Starter.FillPlaceHolder(variant, wildcards[combinationIndex % wildcards.Length]);
+        subRecipe.Finisher?.FillPlaceHolder(variant, wildcards[combinationIndex % wildcards.Length]);
+    }
+    private void Register(GroundRecipe recipe)
+    {
+        CollectibleObject? outputCollectible = recipe.Output.ResolvedItemstack?.Collectible;
+        if (outputCollectible != null)
+        {
+            if (!RecipesByOutput.ContainsKey(outputCollectible)) RecipesByOutput.Add(outputCollectible, new());
+            RecipesByOutput[outputCollectible].Add(recipe);
+        }
+
+        CollectibleObject? starterCollectible = recipe.Starter.ResolvedItemstack?.Collectible;
+        if (outputCollectible != null)
+        {
+            if (!RecipesByStarter.ContainsKey(starterCollectible)) RecipesByOutput.Add(starterCollectible, new());
+            RecipesByOutput[starterCollectible].Add(recipe);
+        }
+
+        Recipes.Add(recipe);
+    }
+    private void LoadRecipe(AssetLocation location, GroundRecipe recipe)
+    {
+        if (mServerApi == null) return;
         if (!recipe.Enabled) return;
         if (!mClassExclusiveRecipes) recipe.RequiresTrait = null;
         if (recipe.Name == null) recipe.Name = location;
 
-        Dictionary<string, string[]> nameToCodeMapping = recipe.ResolveWildcards(mServerApi.World);
+        Dictionary<string, string[]> resolvedWildcards = recipe.ResolveWildcards(mServerApi.World);
 
-        if (nameToCodeMapping.Count > 0)
-        {
-            List<GridRecipe> subRecipes = new();
-
-            int qCombs = 0;
-            bool first = true;
-            foreach (KeyValuePair<string, string[]> val2 in nameToCodeMapping)
-            {
-                if (first) qCombs = val2.Value.Length;
-                else qCombs *= val2.Value.Length;
-                first = false;
-            }
-
-            first = true;
-            foreach (KeyValuePair<string, string[]> val2 in nameToCodeMapping)
-            {
-                string variantCode = val2.Key;
-                string[] variants = val2.Value;
-
-                for (int i = 0; i < qCombs; i++)
-                {
-                    GridRecipe rec;
-
-                    if (first) subRecipes.Add(rec = recipe.Clone());
-                    else rec = subRecipes[i];
-
-                    foreach (CraftingRecipeIngredient ingred in rec.Ingredients.Values)
-                    {
-                        if (ingred.Name == variantCode)
-                        {
-                            ingred.FillPlaceHolder(variantCode, variants[i % variants.Length]);
-                            ingred.Code.Path = ingred.Code.Path.Replace("*", variants[i % variants.Length]);
-                        }
-
-                        if (ingred.ReturnedStack?.Code != null)
-                        {
-                            ingred.ReturnedStack.Code.Path = ingred.ReturnedStack.Code.Path.Replace("{" + variantCode + "}", variants[i % variants.Length]);
-                        }
-                    }
-
-                    rec.Output.FillPlaceHolder(variantCode, variants[i % variants.Length]);
-                }
-
-                first = false;
-            }
-
-            foreach (GridRecipe subRecipe in subRecipes)
-            {
-                if (!subRecipe.ResolveIngredients(mServerApi.World)) continue;
-                mServerApi.RegisterCraftingRecipe(subRecipe);
-            }
-
-        }
-        else
+        if (resolvedWildcards.Count == 0)
         {
             if (!recipe.ResolveIngredients(mServerApi.World)) return;
-            mServerApi.RegisterCraftingRecipe(recipe);
+            Register(recipe);
+            return;
         }
 
+        int combinations = 1;
+
+        foreach ((string variant, string[] wildcards) in resolvedWildcards)
+        {
+            combinations *= wildcards.Length;
+        }
+
+        List<GroundRecipe> subRecipes = new();
+
+        bool first = true;
+
+        foreach ((string variant, string[] wildcards) in resolvedWildcards)
+        {
+            for (int combinationIndex = 0; combinationIndex < combinations; combinationIndex++)
+            {
+                GenerateSubRecipeFromVariants(variant, wildcards, combinationIndex, recipe, subRecipes, ref first);
+            }
+        }
+
+        foreach (GroundRecipe subRecipe in subRecipes)
+        {
+            if (!subRecipe.ResolveIngredients(mServerApi.World)) continue;
+            Register(subRecipe);
+        }
+    }
+
+    private static void RetrieveRecipes(ICoreAPI api, out List<GroundRecipe> recipes)
+    {
+        IAsset asset = api.Assets.Get(cRecipesSyncAsset);
+        byte[] data = asset.Data;
+        recipes = new();
+
+        using MemoryStream serializedRecipesList = new(data);
+        using (BinaryReader reader = new(serializedRecipesList))
+        {
+            int count = reader.ReadInt32();
+            for (int recipeIndex = 0; recipeIndex < count; recipeIndex++)
+            {
+                GroundRecipe recipe = new();
+                recipe.FromBytes(reader, api.World);
+                recipes.Add(recipe);
+            }
+        }
+    }
+    private static void StoreRecipes(ICoreAPI api, GroundRecipe[] recipes)
+    {
+        using MemoryStream serializedRecipesList = new();
+        using (BinaryWriter writer = new(serializedRecipesList))
+        {
+            writer.Write(recipes.Length);
+            foreach (GroundRecipe recipe in recipes)
+            {
+                recipe.ToBytes(writer);
+            }
+        }
+
+        byte[] recipeData = serializedRecipesList.ToArray();
+
+        AssetLocation location = new("recipeslib", cRecipesSyncAsset);
+        Asset configAsset = new(recipeData, location, new GroundRecipeOrigin(recipeData, location));
+        api?.Assets.Add(location, configAsset);
+    }
+}
+
+internal class GroundRecipeOrigin : IAssetOrigin
+{
+    public string OriginPath { get; protected set; }
+
+    private readonly byte[] mData;
+    private readonly AssetLocation mLocation;
+
+    public GroundRecipeOrigin(byte[] data, AssetLocation location)
+    {
+        mData = data;
+        mLocation = location;
+        OriginPath = mLocation.Path;
+    }
+
+    public void LoadAsset(IAsset asset)
+    {
+
+    }
+
+    public bool TryLoadAsset(IAsset asset)
+    {
+        return true;
+    }
+
+    public List<IAsset> GetAssets(AssetCategory Category, bool shouldLoad = true)
+    {
+        List<IAsset> list = new()
+        {
+            new Asset(mData, mLocation, this)
+        };
+
+        return list;
+    }
+
+    public List<IAsset> GetAssets(AssetLocation baseLocation, bool shouldLoad = true)
+    {
+        List<IAsset> list = new()
+        {
+            new Asset(mData, mLocation, this)
+        };
+
+        return list;
+    }
+
+    public virtual bool IsAllowedToAffectGameplay()
+    {
+        return true;
     }
 }

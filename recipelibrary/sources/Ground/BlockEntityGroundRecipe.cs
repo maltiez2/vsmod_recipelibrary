@@ -1,22 +1,18 @@
 ﻿using System;
-using System.Collections.Generic;
-using System.Linq;
 using System.Text;
-using System.Threading.Tasks;
 using Vintagestory.API.Client;
 using Vintagestory.API.Common;
-using Vintagestory.API.Config;
 using Vintagestory.API.Datastructures;
 using Vintagestory.API.MathTools;
 using Vintagestory.GameContent;
 
-namespace RecipeLibrary.Ground;
+namespace RecipesLibrary.Ground;
 public class GroundRecipeEntity : BlockEntityDisplay, IBlockEntityContainer
 {
     public const string ID = "Toolworks.BindSpot";
     public const float BIND_SECONDS = 3.0f;
 
-    public object inventoryLock = new object();
+    public object inventoryLock = new();
 
     protected InventoryGeneric inventory;
 
@@ -105,7 +101,7 @@ public class GroundRecipeEntity : BlockEntityDisplay, IBlockEntityContainer
 
         if (world is IClientWorldAccessor)
         {
-            ModelTransform tf = new ModelTransform();
+            ModelTransform tf = new();
             tf.EnsureDefaultValues();
             tf.Origin.Set(0f, 0f, 0f);
             tf.Translation.X -= Math.Min(1.5f, secondsUsed * 4 * 1.57f);

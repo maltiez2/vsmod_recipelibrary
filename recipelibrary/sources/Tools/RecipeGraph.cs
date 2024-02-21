@@ -3,7 +3,7 @@ using System.Collections.Generic;
 using System.Linq;
 using Vintagestory.API.Common;
 
-namespace RecipeLibrary;
+namespace RecipesLibrary;
 
 public class RecipeGraph : IRecipeGraph
 {

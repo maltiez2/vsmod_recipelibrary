@@ -50,7 +50,8 @@
   <Content Include="assets\**">
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
   </Content>
-  <None Remove="assets\recipelibrary\recipes\ground\test.json" />
+  <None Remove="assets\recipeslib\blocktypes\ground-recipe.json" />
+  <None Remove="assets\recipeslib\recipes\ground\test.json" />
   <Content Include="modinfo.json">
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
   </Content>

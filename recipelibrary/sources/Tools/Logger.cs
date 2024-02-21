@@ -3,7 +3,7 @@ using System.Linq;
 using Vintagestory;
 using Vintagestory.API.Common;
 
-namespace RecipeLibrary;
+namespace RecipesLibrary;
 
 internal static class LoggerWrapper
 {

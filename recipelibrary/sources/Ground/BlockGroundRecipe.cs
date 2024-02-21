@@ -5,7 +5,7 @@ using Vintagestory.API.Common;
 using Vintagestory.API.MathTools;
 using Vintagestory.API.Util;
 
-namespace RecipeLibrary.Ground;
+namespace RecipesLibrary.Ground;
 public class GroundRecipeBlock : Block
 {
     public const string ID = "Toolworks.BlockBindSpot";
