@@ -147,6 +147,7 @@ public class GroundRecipe : IGraphMatchingRecipe, IByteSerializable
     #endregion
 
     public IRecipeGraph? Graph { get; private set; }
+    public int HashId { get; set; } = 0;
 
     #region Workaround
 
@@ -433,6 +434,8 @@ public class GroundRecipe : IGraphMatchingRecipe, IByteSerializable
     {
         writer.Write(Enabled);
 
+        writer.Write(HashId);
+
         Output.ToBytes(writer);
         Starter.ToBytes(writer);
         writer.Write(Finisher != null);
@@ -472,6 +475,8 @@ public class GroundRecipe : IGraphMatchingRecipe, IByteSerializable
     public void FromBytes(BinaryReader reader, IWorldAccessor resolver)
     {
         Enabled = reader.ReadBoolean();
+
+        HashId = reader.ReadInt32();
 
         Output = new();
         Output.FromBytes(reader, resolver);

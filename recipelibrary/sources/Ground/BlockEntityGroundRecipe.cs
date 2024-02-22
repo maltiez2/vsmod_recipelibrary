@@ -5,7 +5,6 @@ using System.Text;
 using Vintagestory.API.Client;
 using Vintagestory.API.Common;
 using Vintagestory.API.Datastructures;
-using Vintagestory.API.MathTools;
 using Vintagestory.GameContent;
 
 namespace RecipesLibrary.Ground;
@@ -22,10 +21,12 @@ public class GroundRecipeEntity : BlockEntityDisplay, IBlockEntityContainer
     private int mSlotsTaken = 0;
     private ICoreAPI? mApi;
     private IRecipeGraphTraversalStack? mTraversalStack;
+    private readonly List<GroundRecipeIngredient> mIngredients = new();
+    private readonly object inventoryLock = new();
 
     public GroundRecipeEntity() : base()
     {
-        
+
     }
 
     public override void Initialize(ICoreAPI api)
@@ -59,32 +60,39 @@ public class GroundRecipeEntity : BlockEntityDisplay, IBlockEntityContainer
 
     public bool OnPlayerInteractStart(IWorldAccessor world, IPlayer player)
     {
+        if (mTraversalStack == null) return false;
+        
         ItemSlot heldSlot = player.InventoryManager.ActiveHotbarSlot;
-        bool shouldUpdate = false;
+        bool shouldUpdate;
+        
         if (heldSlot.Empty)
         {
             shouldUpdate = TryTakeItem(player);
         }
         else
         {
-            if (AttributeToolHandle.HasAttribute(heldSlot.Itemstack))
+            RecipeStackStatus status = mTraversalStack.Push(heldSlot);
+
+            if (status == RecipeStackStatus.Empty || status == RecipeStackStatus.Unmatched)
             {
-                shouldUpdate = TryPutItem(player);
+                mTraversalStack.Pop();
+                return false;
             }
-            else
-            if (AttributeToolBinding.HasAttribute(heldSlot.Itemstack))
-            {
-                if (mInventory[1].Empty) return false;
-                return true;
-            }
+
+            shouldUpdate = TryPutItem(player);
+
+            if (!shouldUpdate) mTraversalStack.Pop();
+
         }
+        
         if (shouldUpdate)
         {
+            ConstructIngredients();
             MarkDirty(true);
             updateMeshes();
         }
 
-        if (mInventory.Empty)
+        if (mInventory?.Empty != false)
         {
             world.BlockAccessor.SetBlock(0, Pos);
             world.BlockAccessor.TriggerNeighbourBlockUpdate(Pos);
@@ -95,67 +103,12 @@ public class GroundRecipeEntity : BlockEntityDisplay, IBlockEntityContainer
 
     public bool OnPlayerInteractStep(IWorldAccessor world, IPlayer byPlayer, float secondsUsed)
     {
-        ItemSlot heldSlot = byPlayer.InventoryManager.ActiveHotbarSlot;
-        if (heldSlot.Empty) return false;
-
-        if (mInventory[1].Empty) return false;
-        if (!AttributeToolBinding.HasAttribute(heldSlot.Itemstack)) return false;
-
-        if (world is IClientWorldAccessor)
-        {
-            ModelTransform tf = new();
-            tf.EnsureDefaultValues();
-            tf.Origin.Set(0f, 0f, 0f);
-            tf.Translation.X -= Math.Min(1.5f, secondsUsed * 4 * 1.57f);
-            tf.Rotation.Y += Math.Min(130f, secondsUsed * 350);
-            byPlayer.Entity.Controls.UsingHeldItemTransformAfter = tf;
-        }
-        if (world.Rand.NextDouble() < 0.025)
-        {
-            world.PlaySoundAt(new AssetLocation("sounds/player/poultice"), Pos.X, Pos.Y, Pos.Z, byPlayer);
-        }
-        //(byPlayer as IClientPlayer)?.ShowChatNotification($"bind seconds {secondsUsed}");
-
-        return secondsUsed < BIND_SECONDS || world.Side == EnumAppSide.Client;
+        return false;
     }
 
     public void OnPlayerInteractStop(IWorldAccessor world, IPlayer byPlayer, float secondsUsed)
     {
-        ItemSlot heldSlot = byPlayer.InventoryManager.ActiveHotbarSlot;
-        if (heldSlot.Empty) return;
-
-        if (mInventory[1].Empty) return;
-        if (!AttributeToolBinding.HasAttribute(heldSlot.Itemstack)) return;
-
-        if (secondsUsed > BIND_SECONDS - 0.05f && world.Side == EnumAppSide.Server)
-        {
-            ItemStack headStack = mInventory[0].Itemstack;
-            ItemStack bindStack = heldSlot.TakeOut(1);
-            ItemStack handleStack = mInventory[1].Itemstack;
-
-            string tool = headStack.Collectible.GetBehavior<CollectibleBehaviorToolHead>().HeadProps.tool;
-            string material = headStack.Collectible.Code.EndVariant();
-
-            AssetLocation toolCode = ToolworksMod.Identify(tool)
-                .WithPathAppendix("-bound")
-                .WithPathAppendix("-" + material);
-
-            Item toolItem = world.GetItem(toolCode);
-
-            ItemStack toolStack = new(toolItem);
-            toolStack.Attributes.SetItemstack(ToolPart.HEAD.ToString(), headStack);
-            toolStack.Attributes.SetItemstack(ToolPart.BINDING.ToString(), bindStack);
-            toolStack.Attributes.SetItemstack(ToolPart.HANDLE.ToString(), handleStack);
-
-            if (!byPlayer.InventoryManager.TryGiveItemstack(toolStack))
-            {
-                world.SpawnItemEntity(toolStack, Pos.ToVec3d());
-            }
-
-            world.BlockAccessor.SetBlock(0, Pos);
-            world.BlockAccessor.TriggerNeighbourBlockUpdate(Pos);
-            heldSlot.MarkDirty();
-        }
+        
     }
 
     public bool TryPutItem(IPlayer player)
@@ -201,6 +154,16 @@ public class GroundRecipeEntity : BlockEntityDisplay, IBlockEntityContainer
         return true;
     }
 
+    public override void ToTreeAttributes(ITreeAttribute tree)
+    {
+        base.ToTreeAttributes(tree);
+
+        int[] recipesIds = Recipes.Select(recipe => recipe.HashId).ToArray();
+
+        IAttribute recipesAttribute = new IntArrayAttribute(recipesIds);
+        tree["recipes"] = recipesAttribute;
+    }
+
     public override void FromTreeAttributes(ITreeAttribute tree, IWorldAccessor worldForResolving)
     {
         base.FromTreeAttributes(tree, worldForResolving);
@@ -208,29 +171,75 @@ public class GroundRecipeEntity : BlockEntityDisplay, IBlockEntityContainer
         {
             updateMeshes();
         }
+
+        Dictionary<int, GroundRecipe>? loadedRecipes = mApi?.ModLoader.GetModSystem<GroundRecipeLoader>().RecipesByHashId;
+
+        if (loadedRecipes == null) return;
+
+        int[]? recipesIds = (tree["recipes"] as IntArrayAttribute)?.value;
+
+        if (recipesIds == null) return;
+
+        List<GroundRecipe> recipes = new();
+        foreach (int hashId in recipesIds.Where(loadedRecipes.ContainsKey))
+        {
+            recipes.Add(loadedRecipes[hashId]);
+        }
+        Recipes = recipes;
+
+        mTraversalStack = new RecipeGraphTraversalStack(recipes.Select(recipe => recipe.Graph).OfType<IRecipeGraph>());
+        foreach (ItemSlot slot in Inventory)
+        {
+            if (slot.Itemstack == null) continue;
+
+            mTraversalStack.Push(slot);
+            mSlotsTaken++;
+        }
+        mMaxSlots = Inventory.Count;
     }
 
     protected override float[][] genTransformationMatrices()
     {
-        float[][] tfMatrices = new float[DisplayedItems][];
+        float[][] transformMatrices = new float[DisplayedItems][];
 
-        for (int i = 0; i < tfMatrices.Length; i++)
+        ModelTransform[] transforms = mIngredients.Select(item => item.GroundRecipeTransform ?? ModelTransform.NoTransform).Reverse().ToArray();
+
+        for (int index = 0; index < transformMatrices.Length || index < transforms.Length; index++)
         {
-            Vec3f off = Vec3f.Zero;
-            tfMatrices[i] =
-                new Matrixf()
-                .Translate(off.X, off.Y, off.Z)
+            transformMatrices[index] = new Matrixf()
+                .Translate(transforms[index].Origin.X, transforms[index].Origin.Y, transforms[index].Origin.Z)
+                .Scale(transforms[index].ScaleXYZ.X, transforms[index].ScaleXYZ.Y, transforms[index].ScaleXYZ.Z)
+                .Translate(transforms[index].Translation.X, transforms[index].Translation.Y, transforms[index].Translation.Z)
+                .RotateX(transforms[index].Rotation.X * (MathF.PI / 180f))
+                .RotateY(transforms[index].Rotation.Y * (MathF.PI / 180f))
+                .RotateZ(transforms[index].Rotation.Z * (MathF.PI / 180f))
                 .Values;
         }
-        return tfMatrices;
+        return transformMatrices;
+    }
+
+
+    private void ConstructIngredients()
+    {
+        IEnumerable<RecipeStackNode>? nodes = mTraversalStack?.Nodes(RecipeStackStatus.Completed);
+        if (nodes == null || !nodes.Any()) nodes = mTraversalStack?.Nodes(RecipeStackStatus.Matched);
+        mIngredients.Clear();
+        if (nodes == null || !nodes.Any()) return;
+        AddIngredient(nodes.First());
+    }
+    private void AddIngredient(RecipeStackNode node)
+    {
+        GroundRecipeIngredient? ingredient = node.Nodes?.First().Matcher as GroundRecipeIngredient;
+        if (ingredient == null) return;
+        mIngredients.Add(ingredient);
+        if (node.Parent == null) return;
+        AddIngredient(node.Parent);
     }
 
     public override void GetBlockInfo(IPlayer forPlayer, StringBuilder dsc)
     {
 
     }
-
-
 
     private int GetDepth()
     {

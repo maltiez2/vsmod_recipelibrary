@@ -6,7 +6,7 @@
 	"class": "GroundRecipeBlock",
 	"entityClass": "GroundRecipeEntity",
 	"shape": {
-		"base": "block/basic/invisible"
+		"base": "game:block/basic/invisible"
 	},
 	"sidesolid": { "all": false },
 	"sideopaque": { "all": false },

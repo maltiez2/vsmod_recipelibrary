@@ -1,7 +1,9 @@
 ﻿using Newtonsoft.Json.Linq;
+using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
+using System.Reflection;
 using Vintagestory.API.Client;
 using Vintagestory.API.Common;
 using Vintagestory.API.Config;
@@ -14,26 +16,29 @@ public class GroundRecipeLoader : ModSystem
 {
     public Dictionary<CollectibleObject, List<GroundRecipe>> RecipesByOutput { get; } = new();
     public Dictionary<CollectibleObject, List<GroundRecipe>> RecipesByStarter { get; } = new();
+    public Dictionary<int, GroundRecipe> RecipesByHashId { get; } = new();
     public List<GroundRecipe> Recipes { get; } = new();
 
-    public override double ExecuteOrder() => 1;
+    public override double ExecuteOrder() => 1.1;
+    public override void Start(ICoreAPI api)
+    {
+        api.RegisterBlockClass("GroundRecipeBlock", typeof(GroundRecipeBlock));
+        api.RegisterBlockEntityClass("GroundRecipeEntity", typeof(GroundRecipeEntity));
+        api.RegisterCollectibleBehaviorClass("GroundRecipeStarterBehavior", typeof(GroundRecipeStarterBehavior));
+        api.RegisterRecipeRegistry<GroundRecipeRegistry>(cRecipeRegistryCode);
+
+        Instance = this;
+        if (api is ICoreServerAPI serverApi) mServerApi = serverApi;
+        if (api is ICoreClientAPI clientApi) mClientApi = clientApi;
+    }
     public override void AssetsLoaded(ICoreAPI api)
     {
-        if (api is ICoreServerAPI serverApi)
-        {
-            mServerApi = serverApi;
-            mClassExclusiveRecipes = serverApi.World.Config.GetBool("classExclusiveRecipes", true);
-            LoadGroundRecipes(serverApi);
-            StoreRecipes(serverApi, Recipes.ToArray());
-        }
+        mClassExclusiveRecipes = api.World.Config.GetBool("classExclusiveRecipes", true);
 
-        if (api is ICoreClientAPI clientApi)
+        if (api is ICoreServerAPI)
         {
-            RetrieveRecipes(clientApi, out List<GroundRecipe> recipes);
-            foreach (GroundRecipe recipe in recipes)
-            {
-                Register(recipe);
-            }
+            LoadGroundRecipes(api);
+            GetRegistry(api)?.Serialize(Recipes.ToArray());
         }
     }
     public override void AssetsFinalize(ICoreAPI api)
@@ -41,6 +46,7 @@ public class GroundRecipeLoader : ModSystem
         Block[] blocks = api.World.SearchBlocks(new("recipeslib:groundrecipe"));
         if (blocks.Length == 0 || blocks[0] is not GroundRecipeBlock recipeBlock) return;
 
+        int count = 0;
         foreach ((CollectibleObject collectible, List<GroundRecipe> recipes) in RecipesByStarter)
         {
             GroundRecipeStarterBehavior behavior = new(collectible)
@@ -50,36 +56,75 @@ public class GroundRecipeLoader : ModSystem
             };
 
             collectible.CollectibleBehaviors = collectible.CollectibleBehaviors.Prepend(behavior).ToArray();
+            count++;
         }
+
+        api.World.Logger.Debug($"[Recipes lib] Collectible crafting behaviors added: {count}");
+    }
+
+    internal static GroundRecipeLoader? Instance;
+    internal void ReloadRecipes()
+    {
+        if (mClientApi == null) return;
+
+        GroundRecipeRegistry? registry = GetRegistry(mClientApi);
+
+        if (registry == null)
+        {
+            mClientApi.Logger.Warning("[Recipes lib] Unable to retrieve recipes registry, recipes were not synchronized with server");
+            return;
+        }
+
+        registry.Deserialize(mClientApi, out List<GroundRecipe> recipes);
+
+        if (recipes.Count == 0)
+        {
+            return;
+        }
+
+        RecipesByOutput.Clear();
+        RecipesByStarter.Clear();
+        RecipesByHashId.Clear();
+        Recipes.Clear();
+
+        int count = 0;
+        foreach (GroundRecipe recipe in recipes)
+        {
+            Register(recipe);
+            count++;
+        }
+
+        mClientApi.Logger.Notification($"[Recipes lib] Loaded {count} recipes from server. ");
     }
 
 
     private bool mClassExclusiveRecipes = true;
-    private const string cRecipesSyncAsset = "config/recipeslib/groundrecipes";
+    private const string cRecipeRegistryCode = "recipeslib:groundrecipes";
     private ICoreServerAPI? mServerApi;
+    private ICoreClientAPI? mClientApi;
 
-    private void LoadGroundRecipes(ICoreServerAPI serverApi)
+    private void LoadGroundRecipes(ICoreAPI api)
     {
-        Dictionary<AssetLocation, JToken> files = serverApi.Assets.GetMany<JToken>(serverApi.Server.Logger, "recipes/ground");
+        Dictionary<AssetLocation, JToken> files = api.Assets.GetMany<JToken>(api.Logger, "recipes/ground");
         int recipeQuantity = 0;
 
-        foreach ((AssetLocation location, JObject recipe) in files.OfType<(AssetLocation, JObject)>())
+        foreach ((AssetLocation location, JToken recipe) in files.Where(entry => entry.Value is JObject))
         {
             LoadRecipe(location, recipe.ToObject<GroundRecipe>(location.Domain));
             recipeQuantity++;
         }
 
-        foreach ((AssetLocation location, JArray recipesArray) in files.OfType<(AssetLocation, JArray)>())
+        foreach ((AssetLocation location, JToken recipesArray) in files.Where(entry => entry.Value is JArray))
         {
-            foreach (JToken token in recipesArray)
+            foreach (JToken token in recipesArray as JArray)
             {
                 LoadRecipe(location, token.ToObject<GroundRecipe>(location.Domain));
                 recipeQuantity++;
             }
         }
 
-        serverApi.World.Logger.Event("{0} ground recipes loaded from {1} files", recipeQuantity, files.Count);
-        serverApi.World.Logger.StoryEvent(Lang.Get("Ground inventions...")); // @TODO Come up with something better
+        api.World.Logger.Event($"[Recipes lib] {recipeQuantity} ground recipes loaded from {files.Count} files");
+        api.World.Logger.StoryEvent(Lang.Get("Ground tinkering..."));
     }
     private static void GenerateSubRecipeFromVariants(string variant, string[] wildcards, int combinationIndex, GroundRecipe recipe, List<GroundRecipe> subRecipes, ref bool first)
     {
@@ -124,16 +169,19 @@ public class GroundRecipeLoader : ModSystem
         }
 
         CollectibleObject? starterCollectible = recipe.Starter.ResolvedItemstack?.Collectible;
-        if (outputCollectible != null)
+        if (starterCollectible != null)
         {
             if (!RecipesByStarter.ContainsKey(starterCollectible)) RecipesByOutput.Add(starterCollectible, new());
             RecipesByOutput[starterCollectible].Add(recipe);
         }
 
+        RecipesByHashId.Add(recipe.HashId, recipe);
         Recipes.Add(recipe);
     }
     private void LoadRecipe(AssetLocation location, GroundRecipe recipe)
     {
+        recipe.HashId = location.GetHashCode();
+
         if (mServerApi == null) return;
         if (!recipe.Enabled) return;
         if (!mClassExclusiveRecipes) recipe.RequiresTrait = null;
@@ -174,41 +222,10 @@ public class GroundRecipeLoader : ModSystem
         }
     }
 
-    private static void RetrieveRecipes(ICoreAPI api, out List<GroundRecipe> recipes)
+    private static GroundRecipeRegistry? GetRegistry(ICoreAPI api)
     {
-        IAsset asset = api.Assets.Get(cRecipesSyncAsset);
-        byte[] data = asset.Data;
-        recipes = new();
-
-        using MemoryStream serializedRecipesList = new(data);
-        using (BinaryReader reader = new(serializedRecipesList))
-        {
-            int count = reader.ReadInt32();
-            for (int recipeIndex = 0; recipeIndex < count; recipeIndex++)
-            {
-                GroundRecipe recipe = new();
-                recipe.FromBytes(reader, api.World);
-                recipes.Add(recipe);
-            }
-        }
-    }
-    private static void StoreRecipes(ICoreAPI api, GroundRecipe[] recipes)
-    {
-        using MemoryStream serializedRecipesList = new();
-        using (BinaryWriter writer = new(serializedRecipesList))
-        {
-            writer.Write(recipes.Length);
-            foreach (GroundRecipe recipe in recipes)
-            {
-                recipe.ToBytes(writer);
-            }
-        }
-
-        byte[] recipeData = serializedRecipesList.ToArray();
-
-        AssetLocation location = new("recipeslib", cRecipesSyncAsset);
-        Asset configAsset = new(recipeData, location, new GroundRecipeOrigin(recipeData, location));
-        api?.Assets.Add(location, configAsset);
+        MethodInfo? getter = typeof(GameMain).GetMethod("GetRecipeRegistry", BindingFlags.Instance | BindingFlags.NonPublic);
+        return (GroundRecipeRegistry?)getter?.Invoke(api.World, new object[] { cRecipeRegistryCode });
     }
 }
 
@@ -236,7 +253,7 @@ internal class GroundRecipeOrigin : IAssetOrigin
         return true;
     }
 
-    public List<IAsset> GetAssets(AssetCategory Category, bool shouldLoad = true)
+    public List<IAsset> GetAssets(AssetCategory category, bool shouldLoad = true)
     {
         List<IAsset> list = new()
         {
@@ -259,5 +276,51 @@ internal class GroundRecipeOrigin : IAssetOrigin
     public virtual bool IsAllowedToAffectGameplay()
     {
         return true;
+    }
+}
+
+internal class GroundRecipeRegistry : RecipeRegistryBase
+{
+    public byte[]? Data { get; set; }
+
+    public override void FromBytes(IWorldAccessor resolver, int quantity, byte[] data)
+    {
+        Data = data;
+        GroundRecipeLoader.Instance?.ReloadRecipes();
+    }
+    public override void ToBytes(IWorldAccessor resolver, out byte[] data, out int quantity)
+    {
+        data = Data ?? Array.Empty<byte>();
+        quantity = 1;
+    }
+
+    public void Serialize(GroundRecipe[] recipes)
+    {
+        using MemoryStream serializedRecipesList = new();
+        using (BinaryWriter writer = new(serializedRecipesList))
+        {
+            writer.Write(recipes.Length);
+            foreach (GroundRecipe recipe in recipes)
+            {
+                recipe.ToBytes(writer);
+            }
+        }
+        Data = serializedRecipesList.ToArray();
+    }
+    public void Deserialize(ICoreAPI api, out List<GroundRecipe> recipes)
+    {
+        recipes = new();
+        if (Data == null) return;
+
+        using MemoryStream serializedRecipesList = new(Data);
+        using BinaryReader reader = new(serializedRecipesList);
+
+        int count = reader.ReadInt32();
+        for (int recipeIndex = 0; recipeIndex < count; recipeIndex++)
+        {
+            GroundRecipe recipe = new();
+            recipe.FromBytes(reader, api.World);
+            recipes.Add(recipe);
+        }
     }
 }

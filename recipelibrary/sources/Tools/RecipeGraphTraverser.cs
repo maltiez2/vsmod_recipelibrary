@@ -1,5 +1,4 @@
 ﻿using System;
-using System.Collections;
 using System.Collections.Generic;
 using System.Linq;
 using Vintagestory.API.Common;
@@ -12,12 +11,13 @@ public interface IRecipeGraphTraversalStack
     public RecipeStackStatus Push(ItemSlot slot);
     public RecipeStackStatus Pop();
     public IEnumerable<IGraphMatchingRecipeNode> Peek(RecipeStackStatus status);
+    public IEnumerable<RecipeStackNode> Nodes(RecipeStackStatus status);
 }
 
 public class RecipeGraphTraversalStack : IRecipeGraphTraversalStack
 {
     public int Depth => mCurrentDepth;
-    
+
     public RecipeGraphTraversalStack(IEnumerable<IRecipeGraph> graphs)
     {
         foreach (IRecipeGraph graph in graphs)
@@ -67,6 +67,13 @@ public class RecipeGraphTraversalStack : IRecipeGraphTraversalStack
             .SelectMany(element => element.Nodes ?? Array.Empty<IGraphMatchingRecipeNode>());
     }
 
+    public IEnumerable<RecipeStackNode> Nodes(RecipeStackStatus status)
+    {
+        return mMatch
+            .Where(stack => stack.Peek().Status == status)
+            .Select(stack => stack.Peek());
+    }
+
     private readonly List<Stack<RecipeStackNode>> mMatch = new();
     private int mCurrentDepth = 0;
 
@@ -91,10 +98,11 @@ public class RecipeGraphTraversalStack : IRecipeGraphTraversalStack
     }
 }
 
-public readonly struct RecipeStackNode
+public class RecipeStackNode
 {
     public readonly IEnumerable<IGraphMatchingRecipeNode>? Nodes;
     public readonly RecipeStackStatus Status;
+    public readonly RecipeStackNode? Parent;
 
     public RecipeStackNode(IGraphMatchingRecipeNode root)
     {
@@ -103,6 +111,8 @@ public readonly struct RecipeStackNode
     }
     public RecipeStackNode(RecipeStackNode parent, ItemSlot slot)
     {
+        Parent = parent;
+
         switch (parent.Status)
         {
             case RecipeStackStatus.Empty:
