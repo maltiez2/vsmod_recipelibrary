@@ -5,4 +5,5 @@
 
 using System.Diagnostics.CodeAnalysis;
 
-[assembly: SuppressMessage("Minor Code Smell", "S3267:Loops should be simplified with \"LINQ\" expressions", Justification = "<Pending>", Scope = "member", Target = "~M:RecipesLibrary.Tags.TagsValues.MatchAny(RecipesLibrary.Tags.TagsValues)~System.Boolean")]
+[assembly: SuppressMessage("Minor Code Smell", "S3267:Loops should be simplified with \"LINQ\" expressions", Justification = "<Pending>", Scope = "member", Target = "~M:RecipesLibrary.TagsComplex.TagsValues.MatchAny(RecipesLibrary.TagsComplex.TagsValues)~System.Boolean")]
+[assembly: SuppressMessage("Minor Code Smell", "S3267:Loops should be simplified with \"LINQ\" expressions", Justification = "<Pending>", Scope = "member", Target = "~M:RecipesLibrary.Tags.TagsManager.MatchAny(Vintagestory.API.Common.RegistryObject,RecipesLibrary.Tags.Tag[])~System.Boolean")]

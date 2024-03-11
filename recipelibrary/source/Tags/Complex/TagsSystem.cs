@@ -1,14 +1,11 @@
-﻿using System.Text;
+﻿using System.Linq;
+using System.Text;
 using System.Text.RegularExpressions;
 using Vintagestory.API.Common;
+using RecipesLibrary.API;
+using System.Collections.Immutable;
 
-namespace RecipesLibrary.Tags;
-
-
-public interface ITagMatcher
-{
-    bool Match(RegistryObject registryObject);
-}
+namespace RecipesLibrary.TagsComplex;
 
 internal class TagsMatcher : ITagMatcher
 {
@@ -32,7 +29,7 @@ internal class TagsMatcher : ITagMatcher
     private static readonly Tag _defaultTag = new("recipeslib", "none");
 }
 
-public class TagsSystem : ModSystem
+public class TagsSystem : ModSystem, ITagsSystem
 {
     public TagsSystem() : base()
     {
@@ -47,7 +44,7 @@ public class TagsSystem : ModSystem
 
     public override void AssetsFinalize(ICoreAPI api)
     {
-        _manager.Construct();
+        _manager.DistributeTags();
     }
 
     public bool RegisterTags(params string[] tags)
@@ -104,22 +101,36 @@ public class TagsSystem : ModSystem
         }
         return allSuccessful;
     }
+    public void RemoveAll(RegistryObject registryObject) => _manager.RemoveAll(registryObject);
+    public ITagMatcher GetMatcher(params string[] tags)
+    {
+        string cacheKey = tags.ToImmutableSortedSet().Aggregate((first, seconds) => $"{first},{seconds}");
 
+        if (!_matchersCache.ContainsKey(cacheKey))
+        {
+            TagsMatcher matcher = new(_manager, tags.Select(tag => Tag.Generate(tag) ?? Tag.GetDefault()).Where(tag => tag != Tag.GetDefault()).ToHashSet());
+            _matchersCache.Add(cacheKey, matcher);
+        }
+
+        return _matchersCache[cacheKey];
+    }
 
     internal readonly TagsManager _manager;
     private ICoreAPI? _api;
+    private readonly Dictionary<string, TagsMatcher> _matchersCache = new();
 }
-
 
 internal sealed class TagsManager
 {
-    public TagsManager()
-    {
-
-    }
-
+    #region Register
     public void RegisterTags(params Tag[] tags)
     {
+        if (_distributed)
+        {
+            RegisterTagsAfterDistributed(tags);
+            return;
+        }
+
         foreach (Tag tag in tags)
         {
             _usedTags.Add(tag);
@@ -127,6 +138,12 @@ internal sealed class TagsManager
     }
     public void AddTags(RegistryObject registryObject, params Tag[] tags)
     {
+        if (_distributed)
+        {
+            AddTagsAfterDistributed(registryObject, tags);
+            return;
+        }
+        
         if (!_tagsToAdd.ContainsKey(registryObject)) _tagsToAdd.Add(registryObject, new());
 
         foreach (Tag tag in tags)
@@ -137,6 +154,12 @@ internal sealed class TagsManager
     }
     public void RemoveTags(RegistryObject registryObject, params Tag[] tags)
     {
+        if (_distributed)
+        {
+            RemoveTagsAfterDistributed(registryObject, tags);
+            return;
+        }
+
         if (!_tagsToAdd.ContainsKey(registryObject)) return;
 
         foreach (Tag tag in tags)
@@ -144,6 +167,14 @@ internal sealed class TagsManager
             _tagsToAdd[registryObject].Remove(tag);
         }
     }
+    public void RemoveAll(RegistryObject registryObject)
+    {
+        _tagsValues.Remove(registryObject);
+        _tagsToAdd.Remove(registryObject);
+    }
+    #endregion
+
+    #region Match
     public bool MatchAll(RegistryObject registryObject, TagsValues tags)
     {
         if (!_tagsValues.ContainsKey(registryObject)) return false;
@@ -158,10 +189,16 @@ internal sealed class TagsManager
     }
     public IEnumerable<RegistryObject> FindAll(TagsValues tags) => _tagsValues.Where(entry => entry.Value.MatchAll(tags)).Select(entry => entry.Key);
     public IEnumerable<RegistryObject> FindAny(TagsValues tags) => _tagsValues.Where(entry => entry.Value.MatchAny(tags)).Select(entry => entry.Key);
+    #endregion
 
-    internal bool Construct()
+    #region Distribution and after
+    internal TagsManager()
     {
-        if (_constructed) return false;
+
+    }
+    internal bool DistributeTags()
+    {
+        if (_distributed) return false;
 
         _customTags.Clear();
         foreach (Tag tag in _usedTags.Where(tag => !LibraryTagsRegistry._libraryTagsMapping.ContainsKey(tag)))
@@ -175,7 +212,7 @@ internal sealed class TagsManager
             _tagsValues.Add(registryObject, new(this, tags));
         }
 
-        _constructed = true;
+        _distributed = true;
         return true;
     }
 
@@ -183,9 +220,41 @@ internal sealed class TagsManager
     internal readonly Dictionary<Tag, int> _customTagsMapping = new();
     internal readonly Dictionary<RegistryObject, TagsValues> _tagsValues = new();
 
-    private bool _constructed = false;
+    private void RegisterTagsAfterDistributed(params Tag[] tags)
+    {
+        foreach (Tag tag in tags.Where(tag => !_customTagsMapping.ContainsKey(tag)))
+        {
+            _customTagsMapping.Add(tag, _customTags.Count);
+            _customTags.Add(tag);
+        }
+    }
+    private void AddTagsAfterDistributed(RegistryObject registryObject, params Tag[] tags)
+    {
+        RegisterTagsAfterDistributed(tags);
+        if (!_tagsValues.ContainsKey(registryObject))
+        {
+            _tagsValues.Add(registryObject, new(this, tags.ToHashSet()));
+            return;
+        }
+
+        _tagsValues[registryObject] = new(this, tags.ToHashSet(), _tagsValues[registryObject], exclude: false);
+    }
+    private void RemoveTagsAfterDistributed(RegistryObject registryObject, params Tag[] tags)
+    {
+        RegisterTagsAfterDistributed(tags);
+        if (!_tagsValues.ContainsKey(registryObject)) return;
+
+        _tagsValues[registryObject] = new(this, tags.ToHashSet(), _tagsValues[registryObject], exclude: true);
+        if (_tagsValues[registryObject].None())
+        {
+            _tagsValues.Remove(registryObject);
+        }
+    }
+
+    private bool _distributed = false;
     private readonly Dictionary<RegistryObject, HashSet<Tag>> _tagsToAdd = new();
     private readonly HashSet<Tag> _usedTags = new();
+    #endregion
 }
 
 public sealed partial class Tag
@@ -229,6 +298,16 @@ public sealed partial class Tag
     }
 
     public override int GetHashCode() => Hash;
+
+
+    public static Tag GetDefault()
+    {
+        _default ??= new("recipeslib", "none");
+        return _default;
+    }
+
+    private static Tag? _default = null;
+
 }
 
 internal readonly struct TagsValues
@@ -237,28 +316,31 @@ internal readonly struct TagsValues
     {
         _tagsManager = manager;
 
-        foreach (LibraryTagsValue tag in tags.Where(LibraryTagsRegistry._libraryTagsMapping.ContainsKey).Select(tag => LibraryTagsRegistry._libraryTagsMapping[tag]))
+        _libraryTags = AggregateLibraryTags(tags);
+
+        AddCustomTags(tags);
+
+        _hash = CalculateHash();
+    }
+    public TagsValues(TagsManager manager, HashSet<Tag> tags, TagsValues previous, bool exclude = false)
+    {
+        _tagsManager = manager;
+
+        _customTags = previous._customTags;
+        AddCustomTags(tags);
+
+        if (exclude)
         {
-            _libraryTags = LibraryTagsValue.Or(_libraryTags, tag);
+            _libraryTags = LibraryTagsValue.And(LibraryTagsValue.Not(AggregateLibraryTags(tags)), previous._libraryTags);
+            RemoveCustomTags(previous._customTags);
+        }
+        else
+        {
+            _libraryTags = LibraryTagsValue.Or(AggregateLibraryTags(tags), previous._libraryTags);
+            AddCustomTags(previous._customTags);
         }
 
-        List<int> customTags = new();
-        foreach (int tag in tags.Where(manager._customTagsMapping.ContainsKey).Select(tag => manager._customTagsMapping[tag]))
-        {
-            _customTags.Add(tag);
-            customTags.Add(tag);
-        }
-
-        customTags.Sort();
-
-        StringBuilder forHash = new();
-        forHash.Append(_libraryTags.Hash);
-        foreach (int tag in customTags)
-        {
-            forHash.Append($"|{tag}");
-        }
-
-        _hash = forHash.ToString().GetHashCode();
+        _hash = CalculateHash();
     }
     public bool MatchAll(TagsValues value)
     {
@@ -308,6 +390,10 @@ internal readonly struct TagsValues
 
         return false;
     }
+    public bool None()
+    {
+        return _libraryTags.Tags == 0 && _customTags.Count == 0;
+    }
 
     public override bool Equals(object? obj)
     {
@@ -341,4 +427,54 @@ internal readonly struct TagsValues
     private readonly HashSet<int> _customTags = new();
     private readonly TagsManager _tagsManager;
     private readonly int _hash;
+
+    private int CalculateHash()
+    {
+        List<int> customTags = new();
+        foreach (int tag in _customTags)
+        {
+            customTags.Add(tag);
+        }
+        customTags.Sort();
+
+        StringBuilder forHash = new();
+        forHash.Append(_libraryTags.Hash);
+        foreach (int tag in customTags)
+        {
+            forHash.Append($"|{tag}");
+        }
+
+        return forHash.ToString().GetHashCode();
+    }
+    private void AddCustomTags(HashSet<Tag> tags)
+    {
+        TagsManager manager = _tagsManager;
+        foreach (int tag in tags.Where(_tagsManager._customTagsMapping.ContainsKey).Select(tag => manager._customTagsMapping[tag]))
+        {
+            _customTags.Add(tag);
+        }
+    }
+    private void AddCustomTags(HashSet<int> tags)
+    {
+        foreach (int tag in tags)
+        {
+            _customTags.Add(tag);
+        }
+    }
+    private void RemoveCustomTags(HashSet<int> tags)
+    {
+        foreach (int tag in tags.Where(_customTags.Contains))
+        {
+            _customTags.Remove(tag);
+        }
+    }
+    private LibraryTagsValue AggregateLibraryTags(HashSet<Tag> tags)
+    {
+        LibraryTagsValue output = new();
+        foreach (LibraryTagsValue tag in tags.Where(LibraryTagsRegistry._libraryTagsMapping.ContainsKey).Select(tag => LibraryTagsRegistry._libraryTagsMapping[tag]))
+        {
+            output = LibraryTagsValue.Or(output, tag);
+        }
+        return output;
+    }
 }

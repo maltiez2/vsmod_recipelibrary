@@ -1,6 +1,6 @@
 ﻿using System.Text;
 
-namespace RecipesLibrary.Tags;
+namespace RecipesLibrary.TagsComplex;
 
 [Flags]
 internal enum LibraryTags
@@ -87,7 +87,7 @@ public static class LibraryTagsRegistry
             _libraryTagsPaths.Add($"recipeslib:{tagName}");
 
             Type? valueType = GetTagValuesType(tag);
-            if (valueType ==  null) continue;
+            if (valueType == null) continue;
 
             TagsWithValues |= tag;
 
@@ -112,7 +112,7 @@ public static class LibraryTagsRegistry
             return Type.GetType($"LibraryTags_{tag}");
         }
         catch
-        { 
+        {
             return null;
         }
     }
@@ -183,6 +183,14 @@ internal readonly struct LibraryTagsValue
             first.Tags & second.Tags,
             (LibraryTags.Type, first.Type & second.Type),
             (LibraryTags.Metal, first.Metal & second.Metal)
+            );
+    }
+    public static LibraryTagsValue Not(LibraryTagsValue value)
+    {
+        return new(
+            ~value.Tags,
+            (LibraryTags.Type, ~value.Type),
+            (LibraryTags.Metal, ~value.Metal)
             );
     }
     public override bool Equals(object? obj)
