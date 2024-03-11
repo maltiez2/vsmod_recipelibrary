@@ -29,7 +29,11 @@ internal static class LoggerWrapper
     public static void Verbose(IWorldAccessor? world, object caller, string format) => world?.Logger?.VerboseDebug(Format(caller, format));
     public static void Verbose(ILogger? logger, object caller, string format) => logger?.VerboseDebug(Format(caller, format));
 
-    private static string Format(object caller, string format) => $"{cPrefix} [{GetCallerTypeName(caller)}] {format}".Replace("{", "{{").Replace("}", "}}");
+    public static void Event(ICoreAPI? api, object caller, string format) => api?.Logger?.Event(Format(caller, format));
+    public static void Event(IWorldAccessor? world, object caller, string format) => world?.Logger?.Event(Format(caller, format));
+    public static void Event(ILogger? logger, object caller, string format) => logger?.Event(Format(caller, format));
+
+    private static string Format(object caller, string format) => $"{cPrefix} ({GetCallerTypeName(caller)}) {format}".Replace("{", "{{").Replace("}", "}}");
     private static string GetCallerTypeName(object caller)
     {
         Type type = caller.GetType();

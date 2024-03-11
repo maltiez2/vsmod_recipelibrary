@@ -82,8 +82,8 @@ internal static class PreGraph
 
     private static List<List<int>> GetPermutations(int N)
     {
-        int[] numbers = new int[N + 1];
-        for (int index = 0; index <= N; index++)
+        int[] numbers = new int[N];
+        for (int index = 0; index < N; index++)
         {
             numbers[index] = index;
         }

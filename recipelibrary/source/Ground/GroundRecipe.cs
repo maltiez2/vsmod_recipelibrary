@@ -16,6 +16,15 @@ public class GroundRecipeIngredient : CraftingRecipeIngredient, IIngredientMatch
     public AssetLocation? Sound { get; set; }
     public bool Starter { get; set; }
 
+    public void EnsureDefaultValues()
+    {
+        GroundRecipeIngredient defaultValues = new();
+
+        if (GroundRecipeTransform == null) GroundRecipeTransform = defaultValues.GroundRecipeTransform;
+        if (Sound == null) Sound = defaultValues.Sound;
+        if (Starter == null) Starter = defaultValues.Starter;
+    }
+
     #region Serialisation
 
     private static void ToBytes(ModelTransform transform, BinaryWriter writer)
@@ -139,10 +148,27 @@ public class GroundRecipe : IGraphMatchingRecipe, IByteSerializable
     public bool CopyAttributesTrigger { get; set; } = false;
     public int[] CopyAttributesFrom { get; set; } = Array.Empty<int>();
     public AssetLocation Name { get; set; } = new("");
-    public string? SurfaceRequirement { get; set; } = "*";
+    public string? SurfaceRequirement { get; set; } = null;
 
     [JsonConverter(typeof(JsonAttributesConverter))]
     public JsonObject? Attributes { get; set; }
+
+    public void EnsureDefaultValues()
+    {
+        GroundRecipe defualtValues = new();
+
+        if (Enabled == null) Enabled = defualtValues.Enabled;
+        if (Starter == null) Starter = defualtValues.Starter;
+        if (Finisher == null) Finisher = defualtValues.Finisher;
+        if (Output == null) Output = defualtValues.Output;
+        if (RequiresTrait == null) RequiresTrait = defualtValues.RequiresTrait;
+        if (AverageDurability == null) AverageDurability = defualtValues.AverageDurability;
+        if (ShowInCreatedBy == null) ShowInCreatedBy = defualtValues.ShowInCreatedBy;
+        if (RecipeGroup == null) RecipeGroup = defualtValues.RecipeGroup;
+        if (CopyAttributesTrigger == null) CopyAttributesTrigger = defualtValues.CopyAttributesTrigger;
+        if (Name == null) Name = defualtValues.Name;
+        if (SurfaceRequirement == null) SurfaceRequirement = defualtValues.SurfaceRequirement;
+    }
 
     #endregion
 
@@ -248,6 +274,8 @@ public class GroundRecipe : IGraphMatchingRecipe, IByteSerializable
     {
         int wildcardStartLength = ingredient.Code.Path.IndexOf("*");
         int wildcardEndLength = ingredient.Code.Path.Length - wildcardStartLength - 1;
+
+        if (wildcardStartLength < 0) return new string[1] { ingredient.Code.Path };
 
         List<string> codes = new();
 

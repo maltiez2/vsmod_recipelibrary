@@ -12,7 +12,7 @@ using Vintagestory.Common;
 
 namespace RecipesLibrary.Ground;
 
-public class GroundRecipeLoader : ModSystem
+public class GroundRecipesLoader : ModSystem
 {
     public Dictionary<CollectibleObject, List<GroundRecipe>> RecipesByOutput { get; } = new();
     public Dictionary<CollectibleObject, List<GroundRecipe>> RecipesByStarter { get; } = new();
@@ -54,6 +54,7 @@ public class GroundRecipeLoader : ModSystem
                 Recipes = recipes,
                 RecipeBlock = recipeBlock
             };
+            //behavior.OnLoaded(api);
 
             collectible.CollectibleBehaviors = collectible.CollectibleBehaviors.Prepend(behavior).ToArray();
             count++;
@@ -62,7 +63,7 @@ public class GroundRecipeLoader : ModSystem
         api.World.Logger.Debug($"[Recipes lib] Collectible crafting behaviors added: {count}");
     }
 
-    internal static GroundRecipeLoader? Instance;
+    internal static GroundRecipesLoader? Instance;
     internal void ReloadRecipes()
     {
         if (mClientApi == null) return;
@@ -90,6 +91,7 @@ public class GroundRecipeLoader : ModSystem
         int count = 0;
         foreach (GroundRecipe recipe in recipes)
         {
+            if (!recipe.ResolveIngredients(mClientApi.World)) continue;
             Register(recipe);
             count++;
         }
@@ -108,9 +110,11 @@ public class GroundRecipeLoader : ModSystem
         Dictionary<AssetLocation, JToken> files = api.Assets.GetMany<JToken>(api.Logger, "recipes/ground");
         int recipeQuantity = 0;
 
-        foreach ((AssetLocation location, JToken recipe) in files.Where(entry => entry.Value is JObject))
+        foreach ((AssetLocation location, JToken token) in files.Where(entry => entry.Value is JObject))
         {
-            LoadRecipe(location, recipe.ToObject<GroundRecipe>(location.Domain));
+            GroundRecipe recipe = token.ToObject<GroundRecipe>(location.Domain);
+            recipe.EnsureDefaultValues();
+            LoadRecipe(location, recipe);
             recipeQuantity++;
         }
 
@@ -118,11 +122,13 @@ public class GroundRecipeLoader : ModSystem
         {
             foreach (JToken token in recipesArray as JArray)
             {
-                LoadRecipe(location, token.ToObject<GroundRecipe>(location.Domain));
+                GroundRecipe recipe = token.ToObject<GroundRecipe>(location.Domain);
+                recipe.EnsureDefaultValues();
+                LoadRecipe(location, recipe);
                 recipeQuantity++;
             }
         }
-
+        
         api.World.Logger.Event($"[Recipes lib] {recipeQuantity} ground recipes loaded from {files.Count} files");
         api.World.Logger.StoryEvent(Lang.Get("Ground tinkering..."));
     }
@@ -171,8 +177,8 @@ public class GroundRecipeLoader : ModSystem
         CollectibleObject? starterCollectible = recipe.Starter.ResolvedItemstack?.Collectible;
         if (starterCollectible != null)
         {
-            if (!RecipesByStarter.ContainsKey(starterCollectible)) RecipesByOutput.Add(starterCollectible, new());
-            RecipesByOutput[starterCollectible].Add(recipe);
+            if (!RecipesByStarter.ContainsKey(starterCollectible)) RecipesByStarter.Add(starterCollectible, new());
+            RecipesByStarter[starterCollectible].Add(recipe);
         }
 
         RecipesByHashId.Add(recipe.HashId, recipe);
@@ -286,7 +292,7 @@ internal class GroundRecipeRegistry : RecipeRegistryBase
     public override void FromBytes(IWorldAccessor resolver, int quantity, byte[] data)
     {
         Data = data;
-        GroundRecipeLoader.Instance?.ReloadRecipes();
+        GroundRecipesLoader.Instance?.ReloadRecipes();
     }
     public override void ToBytes(IWorldAccessor resolver, out byte[] data, out int quantity)
     {

@@ -26,7 +26,7 @@ public class GroundRecipeEntity : BlockEntityDisplay, IBlockEntityContainer
 
     public GroundRecipeEntity() : base()
     {
-
+        mInventory = new InventoryGeneric(0, null, null);
     }
 
     public override void Initialize(ICoreAPI api)
@@ -45,7 +45,7 @@ public class GroundRecipeEntity : BlockEntityDisplay, IBlockEntityContainer
     {
         Recipes = recipes;
         mMaxSlots = GetDepth();
-        mInventory = new InventoryGeneric(mMaxSlots, null, null);
+        mInventory?.AddSlots(mMaxSlots);
         mTraversalStack = new RecipeGraphTraversalStack(recipes.Select(recipe => recipe.Graph).OfType<IRecipeGraph>());
 
         if (Api.Side == EnumAppSide.Client) return;
@@ -172,7 +172,7 @@ public class GroundRecipeEntity : BlockEntityDisplay, IBlockEntityContainer
             updateMeshes();
         }
 
-        Dictionary<int, GroundRecipe>? loadedRecipes = mApi?.ModLoader.GetModSystem<GroundRecipeLoader>().RecipesByHashId;
+        Dictionary<int, GroundRecipe>? loadedRecipes = mApi?.ModLoader.GetModSystem<GroundRecipesLoader>().RecipesByHashId;
 
         if (loadedRecipes == null) return;
 

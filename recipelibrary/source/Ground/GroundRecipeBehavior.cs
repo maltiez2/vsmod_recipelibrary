@@ -40,7 +40,7 @@ public class GroundRecipeStarterBehavior : CollectibleBehavior
 
         IEnumerable<GroundRecipe> recipes = Match(blockSel);
 
-        if (recipes.Any()! || !RecipeBlock.TryCreateSpot(byEntity.World, blockSel, player.Player, recipes))
+        if (!recipes.Any() || !RecipeBlock.TryCreateSpot(byEntity.World, blockSel, player.Player, recipes))
         {
             handling = EnumHandling.PassThrough;
             return;

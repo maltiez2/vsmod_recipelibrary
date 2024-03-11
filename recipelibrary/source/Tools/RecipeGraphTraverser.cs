@@ -125,7 +125,7 @@ public class RecipeStackNode
                 Status = RecipeStackStatus.Empty;
                 return;
             case RecipeStackStatus.Matched:
-                bool completed = Nodes?.Select(node => node.Last()).Aggregate((first, second) => first || second) ?? false;
+                bool completed = parent.Nodes?.Select(node => node.Last()).Aggregate((first, second) => first || second) ?? false;
 
                 if (completed)
                 {

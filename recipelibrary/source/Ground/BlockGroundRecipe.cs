@@ -142,6 +142,7 @@ public class GroundRecipeBlock : Block
     public override string GetPlacedBlockName(IWorldAccessor world, BlockPos pos)
     {
         GroundRecipeEntity? be = world.BlockAccessor.GetBlockEntity(pos) as GroundRecipeEntity;
+        return base.GetPlacedBlockName(world, pos); // @TODO
         if (be == null) return base.GetPlacedBlockName(world, pos);
 
         return be.Inventory[0].GetStackName();
@@ -150,7 +151,8 @@ public class GroundRecipeBlock : Block
     public override WorldInteraction[] GetPlacedBlockInteractionHelp(IWorldAccessor world, BlockSelection selection, IPlayer forPlayer)
     {
         WorldInteraction[] interactions = base.GetPlacedBlockInteractionHelp(world, selection, forPlayer);
-        GroundRecipeEntity? blockEntity = world.BlockAccessor.GetBlockEntity(selection.Position) as GroundRecipeEntity;
+        return interactions;
+        /*GroundRecipeEntity? blockEntity = world.BlockAccessor.GetBlockEntity(selection.Position) as GroundRecipeEntity;
         if (blockEntity == null) return interactions;
 
         if (blockEntity.Inventory[1].Empty)
@@ -160,6 +162,6 @@ public class GroundRecipeBlock : Block
         else
         {
             return bindInteractions.Append(interactions);
-        }
+        }*/
     }
 }
