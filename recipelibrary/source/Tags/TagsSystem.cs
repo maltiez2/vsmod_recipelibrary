@@ -19,6 +19,7 @@ public class TagsSystem : ModSystem, ITagsSystem
     public bool AddTags(RegistryObject registryObject, params string[] tags)
     {
         bool allSuccessful = true;
+        List<Tag> tagsList = new();
         foreach (string tagString in tags)
         {
             if (!Tag.Generate(tagString, out Tag? value, out Tag? name) || value == null || name == null)
@@ -28,14 +29,18 @@ public class TagsSystem : ModSystem, ITagsSystem
                 continue;
             }
 
-            _manager.AddTags(registryObject, name);
-            _manager.AddTags(registryObject, value);
+            tagsList.Add(value);
+            tagsList.Add(name);
         }
+        
+        if (tagsList.Count > 0) _manager.AddTags(registryObject, tagsList.ToArray());
+
         return allSuccessful;
     }
     public bool RemoveTags(RegistryObject registryObject, params string[] tags)
     {
         bool allSuccessful = true;
+        List<Tag> tagsList = new();
         foreach (string tagString in tags)
         {
             Tag? tag = Tag.Generate(tagString);
@@ -47,8 +52,10 @@ public class TagsSystem : ModSystem, ITagsSystem
                 continue;
             }
 
-            _manager.RemoveTags(registryObject, tag);
+            tagsList.Add(tag);
         }
+
+        if (tagsList.Count > 0) _manager.RemoveTags(registryObject, tagsList.ToArray());
         return allSuccessful;
     }
     public void RemoveAll(RegistryObject registryObject) => _manager.RemoveAll(registryObject);
@@ -64,7 +71,6 @@ public class TagsSystem : ModSystem, ITagsSystem
 
         return _matchersCache[cacheKey];
     }
-
 
     internal readonly TagsManager _manager;
     private ICoreAPI? _api;
