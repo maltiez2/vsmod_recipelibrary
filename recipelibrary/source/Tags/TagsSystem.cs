@@ -1,21 +1,69 @@
-﻿using System.Linq;
-using System.Text;
+﻿using System.Text;
 using System.Text.RegularExpressions;
 using Vintagestory.API.Common;
 
 namespace RecipesLibrary.Tags;
 
-public sealed class TagsSystem
+internal sealed class TagsSystem
 {
-    public readonly List<Tag> CustomTags = new();
-    public readonly Dictionary<Tag, int> CustomTagsMapping = new();
-    public readonly Dictionary<RegistryObject, TagValues> TagsValues = new();
-    public readonly Dictionary<Tag, FastTagsValues> FastTagsMapping = new()
+    public TagsSystem()
+    {
+
+    }
+
+    public void AddTags(RegistryObject registryObject, params Tag[] tags)
+    {
+        if (!_tagsToAdd.ContainsKey(registryObject)) _tagsToAdd.Add(registryObject, new());
+
+        foreach (Tag tag in tags)
+        {
+            _tagsToAdd[registryObject].Add(tag);
+            _usedTags.Add(tag);
+        }
+    }
+    public void RemoveTags(RegistryObject registryObject, params Tag[] tags)
+    {
+        if (!_tagsToAdd.ContainsKey(registryObject)) return;
+
+        foreach (Tag tag in tags)
+        {
+            _tagsToAdd[registryObject].Remove(tag);
+        }
+    }
+
+    internal bool Construct()
+    {
+        if (_constructed) return false;
+        
+        _customTags.Clear();
+        foreach (Tag tag in _usedTags.Where(tag => !_fastTagsMapping.ContainsKey(tag)))
+        {
+            _customTagsMapping.Add(tag, _customTags.Count);
+            _customTags.Add(tag);
+        }
+
+        foreach ((RegistryObject registryObject, HashSet<Tag> tags) in _tagsToAdd)
+        {
+            _tagsValues.Add(registryObject, new(this, tags));
+        }
+
+        _constructed = true;
+        return true;
+    }
+
+    internal readonly List<Tag> _customTags = new();
+    internal readonly Dictionary<Tag, int> _customTagsMapping = new();
+    internal readonly Dictionary<RegistryObject, TagsValues> _tagsValues = new();
+    internal readonly Dictionary<Tag, FastTagsValues> _fastTagsMapping = new()
     {
         {  new Tag("recipeslib", "type", "block"), new FastTagsValues(FastTags.Type, type: FastTag_Type.Block) },
         {  new Tag("recipeslib", "type", "item"), new FastTagsValues(FastTags.Type, type: FastTag_Type.Item) },
         {  new Tag("recipeslib", "type", "entity"), new FastTagsValues(FastTags.Type, type: FastTag_Type.Entity) }
     };
+
+    private bool _constructed = false;
+    private readonly Dictionary<RegistryObject, HashSet<Tag>> _tagsToAdd = new();
+    private readonly HashSet<Tag> _usedTags = new();
 }
 
 public sealed partial class Tag
@@ -61,17 +109,17 @@ public sealed partial class Tag
     public override int GetHashCode() => Hash;
 }
 
-public readonly struct TagValues
+public readonly struct TagsValues
 {
-    public TagValues(TagsSystem system, HashSet<Tag> tags)
+    public TagsValues(TagsSystem system, HashSet<Tag> tags)
     {
-        foreach (FastTagsValues tag in tags.Where(system.FastTagsMapping.ContainsKey).Select(tag => system.FastTagsMapping[tag]))
+        foreach (FastTagsValues tag in tags.Where(system._fastTagsMapping.ContainsKey).Select(tag => system._fastTagsMapping[tag]))
         {
             _fastTags = FastTagsValues.Or(_fastTags, tag);
         }
 
         List<int> customTags = new();
-        foreach (int tag in tags.Where(system.CustomTagsMapping.ContainsKey).Select(tag => system.CustomTagsMapping[tag]))
+        foreach (int tag in tags.Where(system._customTagsMapping.ContainsKey).Select(tag => system._customTagsMapping[tag]))
         {
             _customTags.Add(tag);
             customTags.Add(tag);
@@ -91,7 +139,7 @@ public readonly struct TagValues
 
     public override bool Equals(object? obj)
     {
-        if (obj == null || obj.GetHashCode() != _hash || obj is not TagValues tag)
+        if (obj == null || obj.GetHashCode() != _hash || obj is not TagsValues tag)
         {
             return false;
         }
@@ -108,11 +156,11 @@ public readonly struct TagValues
         return true;
     }
     public override readonly int GetHashCode() => _hash;
-    public static bool operator ==(TagValues left, TagValues right)
+    public static bool operator ==(TagsValues left, TagsValues right)
     {
         return left.Equals(right);
     }
-    public static bool operator !=(TagValues left, TagValues right)
+    public static bool operator !=(TagsValues left, TagsValues right)
     {
         return !(left == right);
     }
