@@ -76,10 +76,82 @@ internal sealed class TagsManager
     public IEnumerable<RegistryObject> FindAny(Tag[] tags) => _tagsValues.Where(entry => MatchAny(entry.Key, tags)).Select(entry => entry.Key);
     #endregion
 
+    internal byte[] ToBytes()
+    {
+        using MemoryStream serializedRecipesList = new();
+        using (BinaryWriter writer = new(serializedRecipesList))
+        {
+            writer.Write(_tagsById.Count);
+            foreach (Tag tag in _tagsById)
+            {
+                writer.Write(tag.ToString());
+            }
+
+            writer.Write(_tagsValues.Count);
+            foreach ((RegistryObject? registryObject, HashSet<int>? tagsSet) in _tagsValues)
+            {
+                writer.Write(registryObject.Code.ToString());
+                writer.Write(tagsSet.Count);
+                foreach (int tag in tagsSet)
+                {
+                    writer.Write(tag);
+                }
+            }
+        }
+        return serializedRecipesList.ToArray();
+    }
+    internal bool FromBytes(ICoreAPI api, byte[] bytes)
+    {
+        using MemoryStream serializedRecipesList = new(bytes);
+        using BinaryReader reader = new(serializedRecipesList);
+
+        _tagsById.Clear();
+
+        int tagsCount = reader.ReadInt32();
+        for (int tagIndex = 0; tagIndex < tagsCount; tagIndex++)
+        {
+            string tagString = reader.ReadString();
+            Tag? tag = Tag.Generate(tagString);
+            if (tag == null) return false;
+            _tagsById.Add(tag);
+            _tags.Add(tag);
+            _tagsToId.Add(tag, tagIndex);
+        }
+
+        int registryObjectsCount = reader.ReadInt32();
+        for (int registryObjectIndex = 0; registryObjectIndex < registryObjectsCount; registryObjectIndex++)
+        {
+            string code = reader.ReadString();
+            RegistryObject? registryObject = GetRegistryObject(api, code);
+            if (registryObject == null) return false;
+
+            _tagsValues.Add(registryObject, new());
+            int objectTagsCount = reader.ReadInt32();
+            for (int tagIndex = 0; tagIndex < objectTagsCount; tagIndex++)
+            {
+                int tag = reader.ReadInt32();
+                _tagsValues[registryObject].Add(tag);
+            }
+        }
+
+        return true;
+    }
+
     private readonly List<Tag> _tagsById = new();
     private readonly Dictionary<Tag, int> _tagsToId = new();
     private readonly Dictionary<RegistryObject, HashSet<int>> _tagsValues = new();
     private readonly HashSet<Tag> _tags = new();
+
+    private static RegistryObject? GetRegistryObject(ICoreAPI api, string code)
+    {
+        Block[] blocks = api.World.SearchBlocks(new(code));
+        if (blocks.Length != 0) return blocks[0];
+
+        Item[] items = api.World.SearchItems(new(code));
+        if (items.Length != 0) return items[0];
+
+        return null;
+    }
 }
 
 internal sealed partial class Tag

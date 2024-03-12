@@ -235,56 +235,6 @@ public class GroundRecipesLoader : ModSystem
     }
 }
 
-internal class GroundRecipeOrigin : IAssetOrigin
-{
-    public string OriginPath { get; protected set; }
-
-    private readonly byte[] mData;
-    private readonly AssetLocation mLocation;
-
-    public GroundRecipeOrigin(byte[] data, AssetLocation location)
-    {
-        mData = data;
-        mLocation = location;
-        OriginPath = mLocation.Path;
-    }
-
-    public void LoadAsset(IAsset asset)
-    {
-
-    }
-
-    public bool TryLoadAsset(IAsset asset)
-    {
-        return true;
-    }
-
-    public List<IAsset> GetAssets(AssetCategory category, bool shouldLoad = true)
-    {
-        List<IAsset> list = new()
-        {
-            new Asset(mData, mLocation, this)
-        };
-
-        return list;
-    }
-
-    public List<IAsset> GetAssets(AssetLocation baseLocation, bool shouldLoad = true)
-    {
-        List<IAsset> list = new()
-        {
-            new Asset(mData, mLocation, this)
-        };
-
-        return list;
-    }
-
-    public virtual bool IsAllowedToAffectGameplay()
-    {
-        return true;
-    }
-}
-
 internal class GroundRecipeRegistry : RecipeRegistryBase
 {
     public byte[]? Data { get; set; }

@@ -1,5 +1,4 @@
-﻿using RecipesLibrary.TagsComplex;
-using Vintagestory.API.Common;
+﻿using Vintagestory.API.Common;
 
 namespace RecipesLibrary.API;
 
@@ -14,4 +13,6 @@ public interface ITagsSystem
     bool RemoveTags(RegistryObject registryObject, params string[] tags);
     void RemoveAll(RegistryObject registryObject);
     ITagMatcher GetMatcher(params string[] tags);
+    IEnumerable<string> GetTags(RegistryObject registryObject);
+    IEnumerable<string> GetAllTags();
 }

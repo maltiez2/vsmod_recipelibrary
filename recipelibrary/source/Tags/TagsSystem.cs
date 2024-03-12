@@ -1,6 +1,7 @@
 ﻿using RecipesLibrary.API;
 using System.Collections.Immutable;
 using Vintagestory.API.Common;
+using Vintagestory.API.Server;
 
 namespace RecipesLibrary.Tags;
 
@@ -9,11 +10,24 @@ public class TagsSystem : ModSystem, ITagsSystem
     public TagsSystem() : base()
     {
         _manager = new TagsManager();
+        TagsIntegration.Patch();
     }
 
     public override void Start(ICoreAPI api)
     {
         _api = api;
+        _loader = new(_manager, api);
+    }
+    public override void AssetsLoaded(ICoreAPI api)
+    {
+        if (api is ICoreServerAPI)
+        {
+            _loader?.LoadTagsOnServer();
+        }
+    }
+    public override void Dispose()
+    {
+        TagsIntegration.Unpatch();
     }
 
     public bool AddTags(RegistryObject registryObject, params string[] tags)
@@ -32,7 +46,7 @@ public class TagsSystem : ModSystem, ITagsSystem
             tagsList.Add(value);
             tagsList.Add(name);
         }
-        
+
         if (tagsList.Count > 0) _manager.AddTags(registryObject, tagsList.ToArray());
 
         return allSuccessful;
@@ -71,8 +85,11 @@ public class TagsSystem : ModSystem, ITagsSystem
 
         return _matchersCache[cacheKey];
     }
+    public IEnumerable<string> GetTags(RegistryObject registryObject) => _manager.GetTags(registryObject).Select(tag => tag.ToString());
+    public IEnumerable<string> GetAllTags() => _manager.GetAllTags().Select(tag => tag.ToString())
 
     internal readonly TagsManager _manager;
+    private TagsLoader? _loader;
     private ICoreAPI? _api;
     private readonly Dictionary<string, TagsMatcher> _matchersCache = new();
 }
