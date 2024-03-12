@@ -90,13 +90,14 @@ public class TagsSystem : ModSystem, ITagsSystem
         return allSuccessful;
     }
     public void RemoveAll(RegistryObject registryObject) => _manager.RemoveAll(registryObject);
-    public ITagMatcher GetMatcher(params string[] tags)
+    public ITagMatcher GetMatcher(params string[] tags) => GetMatcher(tagsGroups: tags);
+    public ITagMatcher GetMatcher(params string[][] tagsGroups)
     {
-        string cacheKey = tags.ToImmutableSortedSet().Aggregate((first, seconds) => $"{first},{seconds}");
+        string cacheKey = tagsGroups.Select(batch => batch.ToImmutableSortedSet().Aggregate((first, seconds) => $"{first},{seconds}")).Aggregate((first, seconds) => $"{first};{seconds}");
 
         if (!_matchersCache.ContainsKey(cacheKey))
         {
-            TagsMatcher matcher = new(_manager, tags.Select(tag => Tag.Generate(tag) ?? Tag.GetDefault()).Where(tag => tag != Tag.GetDefault()).ToArray());
+            TagsMatcher matcher = new(_manager, tagsGroups);
             _matchersCache.Add(cacheKey, matcher);
         }
 
@@ -114,22 +115,23 @@ public class TagsSystem : ModSystem, ITagsSystem
 
 internal class TagsMatcher : ITagMatcher
 {
-    public TagsMatcher(ICoreAPI api, params string[] tags)
-    {
-        _manager = api.ModLoader.GetModSystem<TagsSystem>()._manager;
-        IEnumerable<Tag> generated = tags.Select(tag => Tag.Generate(tag) ?? _defaultTag).Where(tag => tag != _defaultTag);
-        _value = generated.ToArray();
-    }
-    public TagsMatcher(TagsManager manager, params Tag[] tags)
+    public TagsMatcher(TagsManager manager, params string[] tags)
     {
         _manager = manager;
-        _value = tags;
+        IEnumerable<Tag> generated = tags.Select(tag => Tag.Generate(tag) ?? _defaultTag).Where(tag => tag != _defaultTag);
+        _value = new Tag[][] { generated.ToArray() };
+    }
+    public TagsMatcher(TagsManager manager, params string[][] tags)
+    {
+        _manager = manager;
+        IEnumerable<Tag[]> generated = tags.Select(batch => batch.Select(tag => Tag.Generate(tag) ?? _defaultTag).Where(tag => tag != _defaultTag).ToArray());
+        _value = generated.ToArray();
     }
 
-    public bool Match(RegistryObject registryObject) => _manager.MatchAny(registryObject, _value);
-    public IEnumerable<RegistryObject> Find() => _manager.FindAny(_value);
+    public bool Match(RegistryObject registryObject) => _manager.Match(registryObject, _value);
+    public IEnumerable<RegistryObject> Find() => _manager.Find(_value);
 
     private readonly TagsManager _manager;
-    private readonly Tag[] _value;
+    private readonly Tag[][] _value;
     private static readonly Tag _defaultTag = new("recipeslib", "none");
 }

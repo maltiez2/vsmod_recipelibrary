@@ -1,4 +1,5 @@
-﻿using System.Text.RegularExpressions;
+﻿using System.Linq;
+using System.Text.RegularExpressions;
 using Vintagestory.API.Common;
 
 namespace RecipesLibrary.Tags;
@@ -72,8 +73,29 @@ internal sealed class TagsManager
 
         return false;
     }
+    public bool Match(RegistryObject registryObject, Tag[][] tags)
+    {
+        if (!_tagsValues.ContainsKey(registryObject)) return false;
+
+        foreach (Tag[] tagsBatch in tags)
+        {
+            bool found = false;
+            foreach (Tag tag in tagsBatch.Where(_tagsToId.ContainsKey))
+            {
+                if (_tagsValues[registryObject].Contains(_tagsToId[tag]))
+                {
+                    found = true;
+                    break;
+                }
+            }
+            if (!found) return false;
+        }
+
+        return true;
+    }
     public IEnumerable<RegistryObject> FindAll(Tag[] tags) => _tagsValues.Where(entry => MatchAll(entry.Key, tags)).Select(entry => entry.Key);
     public IEnumerable<RegistryObject> FindAny(Tag[] tags) => _tagsValues.Where(entry => MatchAny(entry.Key, tags)).Select(entry => entry.Key);
+    public IEnumerable<RegistryObject> Find(Tag[][] tags) => _tagsValues.Where(entry => Match(entry.Key, tags)).Select(entry => entry.Key);
     #endregion
 
     internal byte[] ToBytes()

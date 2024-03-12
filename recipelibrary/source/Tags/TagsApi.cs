@@ -5,6 +5,7 @@ namespace RecipesLibrary.API;
 public interface ITagMatcher
 {
     bool Match(RegistryObject registryObject);
+    IEnumerable<RegistryObject> Find();
 }
 
 public interface ITagsSystem
@@ -15,6 +16,7 @@ public interface ITagsSystem
     bool RemoveTags(RegistryObject registryObject, params string[] tags);
     void RemoveAll(RegistryObject registryObject);
     ITagMatcher GetMatcher(params string[] tags);
+    ITagMatcher GetMatcher(params string[][] tagsGroups);
     IEnumerable<string> GetTags(RegistryObject registryObject);
     IEnumerable<string> GetAllTags();
 }
