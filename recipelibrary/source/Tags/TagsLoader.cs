@@ -1,4 +1,5 @@
 ﻿using Newtonsoft.Json.Linq;
+using RecipesLibrary.API;
 using System.Reflection;
 using Vintagestory.API.Common;
 using Vintagestory.API.Datastructures;
@@ -8,12 +9,15 @@ namespace RecipesLibrary.Tags;
 
 internal class TagsLoader
 {
-    public TagsLoader(TagsManager manager, ICoreAPI api)
+    public TagsLoader(TagsManager manager, ITagsSystem system, ICoreAPI api)
     {
         _api = api;
+        _system = system;
         _manager = manager;
         _ = _api.RegisterRecipeRegistry<TagsRegistry>(_tagsRegistryCode);
     }
+
+    public event Action<ICoreAPI, ITagsSystem>? TagsLoaded;
 
     public static TagsLoader? Instance;
     public void LoadTagsOnClient()
@@ -27,16 +31,19 @@ internal class TagsLoader
         }
 
         registry.Deserialize(_api, _manager);
+        TagsLoaded?.Invoke(_api, _system);
     }
     public void LoadTagsOnServer()
     {
         LoadTagsFromAssets(_api);
         GetRegistry(_api)?.Serialize(_manager);
+        TagsLoaded?.Invoke(_api, _system);
     }
 
 
     private const string _tagsRegistryCode = "recipeslib-tags";
     private readonly ICoreAPI _api;
+    private readonly ITagsSystem _system;
     private readonly TagsManager _manager;
 
     private void LoadTagsFromAssets(ICoreAPI api)

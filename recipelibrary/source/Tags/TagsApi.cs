@@ -9,6 +9,8 @@ public interface ITagMatcher
 
 public interface ITagsSystem
 {
+    event Action<ICoreAPI, ITagsSystem>? TagsLoaded;
+
     bool AddTags(RegistryObject registryObject, params string[] tags);
     bool RemoveTags(RegistryObject registryObject, params string[] tags);
     void RemoveAll(RegistryObject registryObject);

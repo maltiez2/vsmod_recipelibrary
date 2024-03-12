@@ -13,11 +13,26 @@ public class TagsSystem : ModSystem, ITagsSystem
         TagsIntegration.Patch();
     }
 
+    public event Action<ICoreAPI, ITagsSystem>? TagsLoaded
+    {
+        add
+        {
+            if (_loader != null) _loader.TagsLoaded += value;
+
+        }
+        remove
+        {
+            if (_loader != null) _loader.TagsLoaded -= value;
+        }
+    }
+
+    #region Overrides
     public override void Start(ICoreAPI api)
     {
         _api = api;
-        _loader = new(_manager, api);
+        _loader = new(_manager, this, api);
     }
+    public override double ExecuteOrder() => 0.21;
     public override void AssetsLoaded(ICoreAPI api)
     {
         if (api is ICoreServerAPI)
@@ -29,7 +44,9 @@ public class TagsSystem : ModSystem, ITagsSystem
     {
         TagsIntegration.Unpatch();
     }
+    #endregion
 
+    #region ITagsSystem
     public bool AddTags(RegistryObject registryObject, params string[] tags)
     {
         bool allSuccessful = true;
@@ -86,7 +103,8 @@ public class TagsSystem : ModSystem, ITagsSystem
         return _matchersCache[cacheKey];
     }
     public IEnumerable<string> GetTags(RegistryObject registryObject) => _manager.GetTags(registryObject).Select(tag => tag.ToString());
-    public IEnumerable<string> GetAllTags() => _manager.GetAllTags().Select(tag => tag.ToString())
+    public IEnumerable<string> GetAllTags() => _manager.GetAllTags().Select(tag => tag.ToString());
+    #endregion
 
     internal readonly TagsManager _manager;
     private TagsLoader? _loader;
